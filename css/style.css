@@ -1,0 +1,209 @@
+:root {
+  --navy: #1e3a5f;
+  --navy-dark: #16293f;
+  --bg: #f5f6fa;
+  --white: #ffffff;
+  --border: #e2e5ea;
+  --text: #1c2430;
+  --text-muted: #6b7280;
+
+  --green-bg: #e6f7ed;
+  --green-text: #1a7f4b;
+  --orange-bg: #fff4e0;
+  --orange-text: #b8720b;
+  --red-bg: #fdeaea;
+  --red-text: #c53030;
+  --gray-bg: #eef0f3;
+  --gray-text: #6b7280;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-weight: 400;
+}
+
+/* ---------- App shell: this is the fix for the bottom-nav scroll bug ---------- */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  max-width: 480px;
+  margin: 0 auto;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.top-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+}
+
+.top-bar .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  color: var(--navy);
+  font-size: 15px;
+}
+
+.app-content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px 18px 24px;
+}
+
+.bottom-nav {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: space-around;
+  padding: 10px 0 14px;
+  background: var(--white);
+  border-top: 1px solid var(--border);
+}
+
+.bottom-nav a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.bottom-nav a.active { color: var(--navy); font-weight: 500; }
+.bottom-nav svg { width: 20px; height: 20px; }
+
+/* ---------- Cards ---------- */
+.card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.stat-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 8px;
+  text-align: center;
+}
+
+.stat-card .num { font-size: 20px; font-weight: 500; }
+.stat-card .label { font-size: 11px; color: var(--text-muted); }
+
+/* ---------- Lists / rows ---------- */
+.list { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--white); }
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.row:last-child { border-bottom: none; }
+.row .row-label { font-size: 14px; }
+.row .row-sub { font-size: 12px; color: var(--text-muted); }
+
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: #dbe6f5; color: var(--navy);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 500; flex-shrink: 0;
+}
+
+/* ---------- Badges ---------- */
+.badge { font-size: 11px; padding: 3px 10px; border-radius: 8px; font-weight: 500; white-space: nowrap; }
+.badge-approved { background: var(--green-bg); color: var(--green-text); }
+.badge-pending  { background: var(--orange-bg); color: var(--orange-text); }
+.badge-rejected { background: var(--red-bg); color: var(--red-text); }
+.badge-locked   { background: var(--gray-bg); color: var(--gray-text); }
+
+/* ---------- Buttons ---------- */
+button, .btn {
+  font-family: inherit;
+  font-size: 14px;
+  border-radius: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--white);
+  color: var(--text);
+}
+.btn-primary { background: var(--navy); color: var(--white); border: none; }
+.btn-primary:disabled { background: #a9b6c6; cursor: not-allowed; }
+.btn-approve { border: 1px solid var(--green-text); color: var(--green-text); background: var(--white); }
+.btn-reject  { border: 1px solid var(--red-text); color: var(--red-text); background: var(--white); }
+.btn-block { width: 100%; }
+.btn-sm { padding: 6px 10px; font-size: 13px; }
+
+/* ---------- Forms ---------- */
+label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
+input, select, textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  background: var(--white);
+  color: var(--text);
+}
+textarea { resize: vertical; min-height: 60px; }
+
+/* ---------- Login screen (no app-shell, standalone) ---------- */
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 24px;
+}
+.login-card { width: 100%; max-width: 360px; }
+.login-card .logo { text-align: center; margin-bottom: 20px; }
+.login-card h1 { font-size: 18px; font-weight: 500; margin: 0 0 4px; text-align: center; color: var(--navy); }
+.login-card .sub { font-size: 13px; color: var(--text-muted); text-align: center; margin: 0 0 20px; }
+.login-card .helper { font-size: 12px; color: var(--text-muted); text-align: center; margin-top: 14px; }
+.login-card a { color: var(--navy); font-size: 12px; text-decoration: none; }
+
+/* ---------- Progress bar ---------- */
+.progress-track { background: var(--gray-bg); border-radius: 8px; height: 8px; overflow: hidden; margin: 8px 0; }
+.progress-fill { background: var(--navy); height: 100%; border-radius: 8px; }
+
+/* ---------- Misc ---------- */
+.muted { color: var(--text-muted); font-size: 13px; }
+.section-label { font-size: 12px; color: var(--text-muted); margin: 16px 0 8px; text-transform: none; }
+.banner {
+  background: #eef4fb; border: 1px solid #d3e2f2; color: var(--navy);
+  border-radius: 10px; padding: 12px 14px; font-size: 13px; margin-bottom: 16px;
+}
+.center-state { text-align: center; padding: 40px 16px; color: var(--text-muted); }
+.hidden { display: none !important; }
+.reject-box { border: 1px solid var(--red-text); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fff9f9; }
+.actions-right { display: flex; gap: 8px; justify-content: flex-end; }

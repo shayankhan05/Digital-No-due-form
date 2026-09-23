@@ -1,0 +1,13 @@
+# Never commit this — it's a full admin key to your Firebase project
+service-account-key.json
+ 
+# Node dependencies (only exists if you ran npm install for the bulk-import script)
+node_modules/
+ 
+# OS/editor clutter
+.DS_Store
+Thumbs.db
+.vscode/
+ 
+# Firebase CLI local cache
+.firebase/

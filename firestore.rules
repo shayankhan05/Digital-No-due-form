@@ -1,0 +1,54 @@
+rules_version = '2';
+
+// Deploy with: firebase deploy --only firestore:rules
+// These are a reasonable starting point for a pilot, not a finished security audit.
+// Tighten further (e.g. field-level validation, rate limiting) before a full rollout.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function myRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function mySubject() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.subjectCode;
+    }
+
+    // Profiles: everyone signed in can read (needed to show names/roles),
+    // nobody edits from the client — admin manages these via the Firebase console.
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /noDueRequests/{requestId} {
+      allow read: if signedIn();
+
+      // A student can only create a request for themselves.
+      allow create: if signedIn() && request.resource.data.studentId == request.auth.uid;
+
+      // Updates: the owning student (resubmission), or mentor/hod/office acting in their role.
+      allow update: if signedIn() && (
+        resource.data.studentId == request.auth.uid ||
+        myRole() in ['mentor', 'hod', 'office']
+      );
+
+      match /approvals/{approvalId} {
+        allow read: if signedIn();
+
+        // A Stage 1 approver can only touch approvals matching their own scope.
+        // Subject faculty are further restricted to their own subject code.
+        allow update: if signedIn() && (
+          resource.data.studentId == request.auth.uid || // student resubmitting
+          (myRole() == resource.data.approverType &&
+            (myRole() != 'subject_faculty' || mySubject() == resource.data.subjectCode))
+        );
+      }
+    }
+  }
+}
