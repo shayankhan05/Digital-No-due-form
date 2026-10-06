@@ -131,6 +131,72 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     }
     return {rows:result,total:result.length,valid:result.filter(r=>r.status==='VALID').length,warnings:result.filter(r=>r.status==='WARNING').length,errors:result.filter(r=>r.status==='ERROR').length,duplicates:result.filter(r=>r.duplicate).length};
   }
+  // Teacher identity is independent of teaching assignments. Never adopt an
+  // unmanaged Auth account or use an import to change an existing user's role.
+  const staffRoles=roles.filter(role=>!['admin','student'].includes(role));
+  const teacherRequestId=row=>`teacher_${hash(row.collegeEmail)}`;
+  async function validateTeacher(input,p) {
+    if(!input || !staffRoles.includes(text(input.role))) fail('An institutional staff role is required; use subject_faculty for teaching accounts.');
+    if(!text(input.employeeId)) fail('Employee ID is required.');
+    const safe={name:input.name,collegeEmail:input.collegeEmail,phone:input.phone,department:input.department,facultyId:input.employeeId,role:text(input.role)};
+    const normalized=normalize(safe,p || await policy());
+    let existing;try {existing=await auth.getUserByEmail(normalized.collegeEmail);}catch(error){if(error.code!=='auth/user-not-found')throw error;}
+    let pendingCaller;
+    if(existing) {
+      if(existing.disabled) fail('Existing account is disabled; review it individually before importing.');
+      const profile=(await db.doc(`users/${existing.uid}`).get()).data();
+      const job=(await db.doc(`provisioningJobs/${existing.uid}`).get()).data();
+      const ownedJob=job && job.role===normalized.role && job.facultyId===normalized.facultyId && job.email===normalized.collegeEmail && existing.uid===`p_${hash(`${job.caller}:${teacherRequestId(normalized)}`).slice(0,48)}`;
+      if(profile) {
+        if(profile.role!==normalized.role || profile.facultyId!==normalized.facultyId || email(profile.email)!==normalized.collegeEmail) fail('Existing email belongs to a different role or employee ID. Import cannot change institutional identity.','already-exists');
+        if(ownedJob && job.state!=='complete')pendingCaller=job.caller;
+      } else {
+        if(!ownedJob) fail('Existing Authentication account has no matching institutional teacher profile. Review it individually.','already-exists');
+        pendingCaller=job.caller;
+      }
+    }
+    const {row}=await validate(safe,{uid:existing?.uid,p});
+    return {row:{name:row.name,collegeEmail:row.collegeEmail,phone:row.phone,department:row.department,employeeId:row.facultyId,role:row.role},uid:existing?.uid,pendingCaller};
+  }
+  async function previewTeachers(inputs) {
+    if(!Array.isArray(inputs) || inputs.length<1 || inputs.length>100) fail('Preview 1–100 teacher rows per chunk.');
+    const p=await policy(),rows=[],seen=new Map();
+    for(let index=0;index<inputs.length;index++) {
+      let checked;
+      try {
+        const {row,uid,pendingCaller}=await validateTeacher(inputs[index],p);
+        const warnings=uid?[pendingCaller?'Retry will finish the interrupted teacher provisioning.':'Existing teacher will be updated; UID, password and teaching assignments are preserved.']:[];
+        checked={index,status:warnings.length?'WARNING':'VALID',row,warnings,accountExists:Boolean(uid)};
+      } catch(error) {checked={index,status:'ERROR',row:inputs[index],error:error.message,duplicate:error.code==='already-exists'};}
+      // Mark both occurrences, including invalid rows, so a duplicate cannot
+      // become a partial import merely because one occurrence passed validation.
+      for(const [field,value] of [['collegeEmail',email(inputs[index]?.collegeEmail)],['employeeId',text(inputs[index]?.employeeId)]]) {
+        if(!value)continue;
+        const key=`${field}:${value}`;
+        if(seen.has(key)) {
+          for(const item of [rows[seen.get(key)],checked]) Object.assign(item,{status:'ERROR',error:`Duplicate ${field} in uploaded teacher rows.`,duplicate:true});
+        } else seen.set(key,index);
+      }
+      rows.push(checked);
+    }
+    return {rows,total:rows.length,valid:rows.filter(r=>r.status==='VALID').length,warnings:rows.filter(r=>r.status==='WARNING').length,errors:rows.filter(r=>r.status==='ERROR').length,duplicates:rows.filter(r=>r.duplicate).length};
+  }
+  async function provisionTeacher(caller,input) {
+    const p=await policy(),checked=await validateTeacher(input,p),row=checked.row;
+    if(!checked.uid || checked.pendingCaller) {
+      const result=await provision(checked.pendingCaller || caller,{...row,facultyId:row.employeeId},teacherRequestId(row));
+      return {...result,employeeId:row.employeeId,accountUpdated:false};
+    }
+    const uid=checked.uid,ref=db.doc(`users/${uid}`),keys=[['email',row.collegeEmail],['facultyId',row.employeeId]].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
+    await db.runTransaction(async t=>{
+      const [profile,...identities]=await Promise.all([t.get(ref),...keys.map(key=>t.get(key))]);
+      if(profile.data()?.role!==row.role || profile.data()?.facultyId!==row.employeeId || email(profile.data()?.email)!==row.collegeEmail || identities.some(s=>s.exists&&s.data().uid!==uid)) fail('Institutional identity changed; validate the teacher CSV again.','already-exists');
+      for(const key of keys)t.set(key,{uid},{merge:true});
+      t.set(ref,{name:row.name,email:row.collegeEmail,phone:row.phone,department:row.department,facultyId:row.employeeId,updatedAt:stamp()},{merge:true});
+    });
+    // Do not reset credentials, send another activation, or rewrite mappings.
+    return {uid,name:row.name,email:row.collegeEmail,employeeId:row.employeeId,role:row.role,accountCreated:false,accountUpdated:true,warnings:[],activation:'unchanged'};
+  }
   async function planFor(student,offerings) {
     const config=(await db.doc('settings/workflow').get()).data();
     if(!config) fail('Configure workflow assignments before enrolling students.');
@@ -212,7 +278,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
       const snapshots=await Promise.all(keys.map(ref=>t.get(ref)));
       if(snapshots.some(s=>s.exists && s.data().uid!==uid)) fail('Duplicate institutional identity.','already-exists');
       for(const ref of keys) t.set(ref,{uid,createdAt:stamp()},{merge:true});
-      t.set(jobRef,{caller,digest,state:'reserved',email:row.collegeEmail,updatedAt:stamp()},{merge:true});
+      t.set(jobRef,{caller,digest,state:'reserved',email:row.collegeEmail,role:row.role,facultyId:row.facultyId,updatedAt:stamp()},{merge:true});
     });
     let user;
     try {user=await auth.getUser(uid);} catch(error) {if(error.code!=='auth/user-not-found') throw error;}
@@ -305,6 +371,8 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
       case 'savePolicy':return savePolicy(data.policy || {});
       case 'previewAccounts':return previewAccounts(data.rows);
       case 'provision':return provision(uid,data.row,data.requestId);
+      case 'previewTeachers':return previewTeachers(data.rows);
+      case 'importTeacher':return provisionTeacher(uid,data.row);
       case 'previewOfferings':return previewOfferings(data.rows);
       case 'importOffering':return importOffering(data.row);
       case 'mapClass':return mapClass(data);

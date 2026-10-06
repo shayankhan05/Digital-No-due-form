@@ -1,0 +1,7 @@
+name,collegeEmail,phone,department,employeeId,role
+Demo Faculty 1,rahul.faculty@demo.test,9000001001,ISE,FAC101,subject_faculty
+Demo Faculty 2,neha.faculty@demo.test,9000001002,ISE,FAC102,subject_faculty
+Demo Faculty 3,demo.faculty3@demo.test,9000001003,ISE,FAC103,subject_faculty
+Demo Faculty 4,demo.faculty4@demo.test,9000001004,ISE,FAC104,subject_faculty
+Demo Faculty 5,demo.faculty5@demo.test,9000001005,ISE,FAC105,subject_faculty
+Demo Faculty 6,demo.faculty6@demo.test,9000001006,ISE,FAC106,subject_faculty

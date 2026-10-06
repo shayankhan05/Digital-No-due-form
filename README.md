@@ -155,7 +155,45 @@ npx firebase deploy --project digital-no-due-shayan --config ../firebase.json --
 
 Replace the project ID only if your existing project differs from `js/firebase-config.js`. Prepare/link production records using Console/bootstrap and the admin page; the local demo seed must never be repurposed as a production import. Rules and indexes must be deployed alongside the app before using the new features. Hosting ignores tests, docs, caches, logs and rules files.
 
-## Handover
+## Bulk teacher import
+
+In Admin → Bulk CSV import, choose **Teachers / Faculty**, upload the CSV,
+validate the preview, review warnings, and confirm the validated rows. Download
+the result report to inspect failures before retrying. Required CSV headers:
+
+```csv
+name,collegeEmail,phone,department,employeeId,role
+```
+
+Phone can be blank. Use `subject_faculty` for teachers; other institutional staff
+roles are accepted, but `admin` and `student` are rejected by this importer.
+See `templates/teacher-import.csv` and the synthetic `templates/demo-teachers.csv`.
+Duplicate emails/employee IDs are flagged across the entire CSV. Existing staff
+email imports update name, phone and department only when the role and employee
+ID match; UID, password, custom fields, assignments and marks are preserved.
+Disabled accounts and unmanaged Auth identities require individual review.
+
+New emulator accounts receive `DemoPassword123!`; re-import never resets a
+password. Production uses a random initial password and the existing activation
+email flow, without storing plaintext passwords in Firestore. Institution domain
+policy, SMTP configuration and `SMTP_PASSWORD` remain required for custom
+activation email. A failed delivery is reported and can be retried, or the user
+can use Forgot password. No production deployment is performed by local testing.
+
+Import teachers first, then offerings using their `teacherEmail`. The backend
+resolves that email to the real Auth UID and stores it as the offering's
+`teacherId`. Subjects, semester, section and scheme stay in offerings, not in
+teacher profiles. The existing offering template still requires `credits` and
+`components` headers; credits may be blank, and components contain configured
+assessment IDs/labels/maxima. Then import students normally. Missing teachers
+block offering validation; repeat imports keep the same offering IDs.
+
+Run `npm run audit` from `tests` for all regression tests on the separate audit
+emulators. Do not run `npm test` against your current browser demo: its security
+fixtures clear that test project's Firestore. Keep the existing demo session and
+data while testing teacher imports.
+
+## Handover links
 
 - [Audit and implementation decisions](docs/AUDIT.md)
 - [Exact created/modified file list](docs/CHANGES.md)

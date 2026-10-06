@@ -149,6 +149,81 @@ test('fully scoped offerings supersede legacy fallbacks without deleting enrollm
   await login(student.email);assert.equal((await academicDetails(student.uid)).subjects.length,3);assert.equal((await getRequiredApprovers(student.uid)).filter(i=>i.type==='subject_faculty').length,3);
 });
 
+test('teacher CSV validates required fields, staff roles, duplicates and identity conflicts',async()=>{
+  await login(`${prefix}-admin@demo.test`);
+  const row={name:'Synthetic teacher',collegeEmail:`${prefix}-csv-teacher@demo.test`,department:'ISE',employeeId:`${prefix}-CSV`,phone:'0000000000',role:'subject_faculty'};
+  assert.equal(parseCSV('name,collegeEmail,phone,department,employeeId,role\nTeacher,test@demo.test,,ISE,F01,subject_faculty',['name','collegeEmail','phone','department','employeeId','role']).length,1);
+  for(const field of ['name','collegeEmail','department','employeeId','role'])assert.equal((await api('previewTeachers',{rows:[{...row,[field]:''}]})).errors,1,field);
+  for(const role of ['student','admin','unknown'])assert.equal((await api('previewTeachers',{rows:[{...row,role}]})).errors,1);
+  assert.equal((await api('previewTeachers',{rows:[{...row,collegeEmail:'invalid'}]})).errors,1);
+  for(const pair of [[row,{...row,employeeId:'different'}],[row,{...row,collegeEmail:`${prefix}-other@demo.test`}],[row,{...row,collegeEmail:row.collegeEmail.toUpperCase()}]]) {
+    const duplicate=await api('previewTeachers',{rows:pair});assert.equal(duplicate.errors,2);assert.equal(duplicate.duplicates,2);
+  }
+  const unmanaged=await server.auth.createUser({email:`${prefix}-unmanaged@demo.test`,password:'DemoPassword123!'});
+  await assert.rejects(api('importTeacher',{row:{...row,collegeEmail:unmanaged.email}}),e=>e.code==='functions/already-exists');
+  await assert.rejects(api('importTeacher',{row:{...row,collegeEmail:created[0].email}}),e=>e.code==='functions/already-exists');
+  await signOut(auth);await assert.rejects(api('previewTeachers',{rows:[row]}),e=>e.code==='functions/unauthenticated');
+  await login(`${prefix}-mentor@demo.test`);await assert.rejects(api('importTeacher',{row}),e=>e.code==='functions/permission-denied');
+  await login(`${prefix}-admin@demo.test`);
+});
+
+test('teacher import recovers interrupted Auth creation and concurrent same-row retries',async()=>{
+  await login(`${prefix}-admin@demo.test`);
+  const row={name:'Interrupted teacher',collegeEmail:`${prefix}-interrupted-teacher@demo.test`,phone:'',department:'ISE',employeeId:`${prefix}-INTERRUPTED`,role:'subject_faculty'};
+  let interrupt=true;
+  const guardedAuth=new Proxy(server.auth,{get(target,key){if(key==='createUser')return async options=>{const user=await target.createUser(options);if(interrupt){interrupt=false;throw new Error('Synthetic interruption after Auth creation');}return user;};const value=target[key];return typeof value==='function'?value.bind(target):value;}});
+  const service=createProvisioner({db:server.db,auth:guardedAuth,demo:true});
+  await assert.rejects(service.dispatch(ids.admin,{action:'importTeacher',row}),/Synthetic interruption/);
+  const authUser=await server.auth.getUserByEmail(row.collegeEmail);assert.equal((await server.db.doc(`users/${authUser.uid}`).get()).exists,false);
+  assert.equal((await api('previewTeachers',{rows:[row]})).warnings,1);
+  const repaired=await api('importTeacher',{row});assert.equal(repaired.uid,authUser.uid);assert.equal((await server.db.doc(`users/${authUser.uid}`).get()).data().role,'subject_faculty');
+  const concurrent={...row,collegeEmail:`${prefix}-concurrent-teacher@demo.test`,employeeId:`${prefix}-CONCURRENT`};
+  const responses=await Promise.all([api('importTeacher',{row:concurrent}),api('importTeacher',{row:concurrent})]);assert.equal(responses[0].uid,responses[1].uid);
+  assert.equal((await server.db.collection('users').where('email','==',concurrent.collegeEmail).get()).size,1);
+});
+
+test('six imported teachers login, resolve offerings, isolate A/B/C rosters and preserve independent marks on repeat imports',async()=>{
+  await login(`${prefix}-admin@demo.test`);
+  const teacherRows=Array.from({length:6},(_,i)=>({name:`CSV Teacher ${i+1}`,collegeEmail:`${prefix}-teacher-csv${i}@demo.test`,phone:'0000000000',department:'ISE',employeeId:`${prefix}-FAC${i}`,role:'subject_faculty'}));
+  assert.equal((await api('previewTeachers',{rows:teacherRows})).valid,6);
+  const teachers=[];for(const row of teacherRows)teachers.push(await api('importTeacher',{row}));
+  const offers=[];
+  for(let i=0;i<6;i++) {
+    const row={...syntheticOffering(['A','A','B','B','C','C'][i],teacherRows[i].collegeEmail),semester:9,subjectCode:['BCS501','BCS502','BCS501','BCS503','BCS502','BCS503'][i]};
+    assert.equal((await api('previewOfferings',{rows:[row]})).valid,1);
+    offers.push({row,...await api('importOffering',{row})});
+  }
+  const pupils=[];
+  for(let i=0;i<6;i++)pupils.push(await api('provision',{row:{...rows[i],semester:9,section:['A','A','B','B','C','C'][i],usn:`TEACH${Date.now()}${i}`,collegeEmail:`${prefix}-teacher-pupil${i}@demo.test`},requestId:`${prefix}-teacher-pupil${i}`}));
+  let preserved;
+  for(let i=0;i<6;i++) {
+    assert.equal(await login(teacherRows[i].collegeEmail),teachers[i].uid);
+    const classes=await page('offerings',[['teacherId','==',teachers[i].uid]]);assert.equal(classes.rows.length,1);assert.equal(classes.rows[0].id,offers[i].id);
+    const roster=await page('enrollments',[['offeringId','==',offers[i].id],['teacherId','==',teachers[i].uid],['active','==',true]]);assert.equal(roster.rows.length,2);assert.ok(roster.rows.every(r=>r.section===offers[i].row.section&&r.semester===9));
+    if(i===0) {
+      await saveMarks(roster.rows[0],classes.rows[0],{ia1:19,assignment:6},teachers[i].uid);await saveMarks(roster.rows[1],classes.rows[0],{ia1:27,assignment:9},teachers[i].uid);
+      preserved=await Promise.all(roster.rows.map(async r=>[r.id,(await server.db.doc(`marks/${r.id}`).get()).data()]));
+      await assert.rejects(getDoc(doc(db,'students',pupils[2].uid)),e=>e.code==='permission-denied');
+    }
+  }
+  await login(`${prefix}-admin@demo.test`);
+  await server.db.doc(`users/${teachers[0].uid}`).set({customNote:'Keep this field',scheme:'2022'},{merge:true});
+  await server.auth.updateUser(teachers[0].uid,{password:'PreservedTeacherPassword456!'});
+  assert.equal((await api('previewTeachers',{rows:teacherRows})).warnings,6);
+  for(let repeat=0;repeat<2;repeat++)for(let i=0;i<6;i++) {
+    const result=await api('importTeacher',{row:{...teacherRows[i],name:`Updated CSV Teacher ${i+1}`}});assert.equal(result.uid,teachers[i].uid);assert.equal(result.accountCreated,false);assert.equal(result.activation,'unchanged');
+    assert.equal((await api('importOffering',{row:offers[i].row})).id,offers[i].id);
+    assert.equal((await server.db.collection('users').where('email','==',teacherRows[i].collegeEmail).get()).size,1);
+  }
+  for(const [id,marks] of preserved)assert.deepEqual((await server.db.doc(`marks/${id}`).get()).data(),marks);
+  const profile=(await server.db.doc(`users/${teachers[0].uid}`).get()).data();assert.equal(profile.customNote,'Keep this field');assert.equal(profile.scheme,'2022');assert.equal(profile.offeringIds,undefined);assert.equal(profile.password,undefined);
+  assert.equal(await login(teacherRows[0].collegeEmail,'PreservedTeacherPassword456!'),teachers[0].uid);
+  await login(`${prefix}-admin@demo.test`);
+  await assert.rejects(api('importTeacher',{row:{...teacherRows[0],employeeId:'changed'}}),e=>e.code==='functions/already-exists');
+  await assert.rejects(api('importTeacher',{row:{...teacherRows[0],role:'hod'}}),e=>e.code==='functions/already-exists');
+  await assert.rejects(api('importTeacher',{row:{...teacherRows[1],collegeEmail:`${prefix}-different-email@demo.test`}}),e=>e.code==='functions/already-exists');
+});
+
 test('Firebase forgot password and reauthenticated change password work in the emulator',async()=>{
   const target=created[1];await signOut(auth);await sendPasswordResetEmail(auth,target.email);
   const response=await fetch(`http://127.0.0.1:9200/emulator/v1/projects/${projectId}/oobCodes`);assert.equal(response.ok,true);
@@ -166,4 +241,10 @@ test('production branch never issues demo passwords and reports activation deliv
   const result=await service.dispatch(ids.admin,{action:'provision',row,requestId:`${prefix}-production`});assert.equal(result.activation,'delivery-failed');assert.equal(result.demoPassword,undefined);
   const profile=(await server.db.doc(`users/${result.uid}`).get()).data();assert.equal(profile.password,undefined);
   const rejected=await service.dispatch(ids.admin,{action:'previewAccounts',rows:[{...row,collegeEmail:'x@demo.test'}]});assert.equal(rejected.rows[0].status,'ERROR');
+  const teacher={role:'subject_faculty',name:'Production teacher path',collegeEmail:`${prefix}-prod-teacher@college.invalid`,department:'ISE',employeeId:`${prefix}-prod-teacher`,phone:''};
+  const imported=await service.dispatch(ids.admin,{action:'importTeacher',row:teacher});assert.equal(imported.activation,'delivery-failed');assert.equal(imported.demoPassword,undefined);
+  assert.equal((await server.db.doc(`users/${imported.uid}`).get()).data().password,undefined);
+  assert.ok(!JSON.stringify((await server.db.doc(`provisioningJobs/${imported.uid}`).get()).data()).includes('DemoPassword123!'));
+  const repeated=await service.dispatch(ids.admin,{action:'importTeacher',row:teacher});assert.equal(repeated.uid,imported.uid);assert.equal(repeated.activation,'unchanged');assert.equal(repeated.demoPassword,undefined);
+  await assert.rejects(login(teacher.collegeEmail),e=>['auth/invalid-credential','auth/wrong-password'].includes(e.code));
 });

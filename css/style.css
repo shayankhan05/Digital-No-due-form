@@ -1634,6 +1634,10 @@ body:has(.academic-links) .app-shell { flex: 1 1 0; height: auto; min-height: 0;
 }
 .table-scroll table { min-width: 480px; }
 #importPreview table { min-width: 720px; }
+.teacher-preview :is(th, td) { min-width: 120px; }
+.teacher-preview :is(th, td):first-child { min-width: 64px; }
+.teacher-preview :is(th, td):nth-child(3),
+.teacher-preview :is(th, td):nth-child(6) { min-width: 220px; }
 #records, #searchResults, #importResults, #csvPreview { min-width: 0; overflow-wrap: anywhere; }
 #policyForm, #accountForm {
   grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
