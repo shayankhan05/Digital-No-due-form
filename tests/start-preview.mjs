@@ -1,0 +1,12 @@
+import {spawn} from 'node:child_process';
+import {existsSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {resolve,dirname} from 'node:path';
+const tests=dirname(fileURLToPath(import.meta.url)),root=resolve(tests,'..');
+const backup=resolve(root,'local-emulator-backup','current');
+if(!backup.startsWith(root+'\\') && !backup.startsWith(root+'/')) throw new Error('Backup must stay inside the project.');
+const args=[resolve(tests,'node_modules/firebase-tools/lib/bin/firebase.js'),'emulators:start','--project','demo-digital-no-due','--only','firestore,auth,hosting,functions','--config',resolve(root,'firebase.json'),'--export-on-exit',backup];
+if(existsSync(resolve(backup,'firebase-export-metadata.json'))) args.push('--import',backup);
+const child=spawn(process.execPath,args,{cwd:tests,stdio:'inherit',env:{...process.env,FUNCTIONS_DISCOVERY_TIMEOUT:'60'}});
+child.on('exit',code=>{process.exitCode=code || 0;});
+child.on('error',error=>{console.error(error.message);process.exitCode=1;});

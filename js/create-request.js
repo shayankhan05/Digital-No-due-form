@@ -1,20 +1,25 @@
 import { requireAuth } from "./auth.js";
+import { initThemeToggle } from "./theme.js";
 import { submitRequest, getRequiredApprovers } from "./workflow.js";
+import { studentProfile } from "./academic.js";
+import { escapeHtml as e, errorState } from "./ui.js";
+initThemeToggle();
 
 const content = document.getElementById("content");
 
-requireAuth().then((student) => {
-  const required = getRequiredApprovers(student.semester, student.section);
-  const chips = required.map((r) => `<span class="badge badge-locked" style="margin:0 6px 6px 0; display:inline-block;">${r.label}</span>`).join("");
+requireAuth(["student"]).then(async (profile) => {
+  const student = await studentProfile(profile.uid, profile);
+  const required = await getRequiredApprovers(profile.uid);
+  const chips = required.map((r) => `<span class="badge badge-locked" style="margin:0 6px 6px 0; display:inline-block;">${e(r.label)}</span>`).join("");
 
   content.innerHTML = `
     <div class="card">
       <p class="section-label" style="margin-top:0;">Student information</p>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; font-size:14px;">
-        <div><span class="muted">USN</span><br>${student.usn}</div>
-        <div><span class="muted">Name</span><br>${student.name}</div>
-        <div><span class="muted">Semester</span><br>${student.semester}</div>
-        <div><span class="muted">Section</span><br>${student.section}</div>
+        <div><span class="muted">USN</span><br>${e(student.usn)}</div>
+        <div><span class="muted">Name</span><br>${e(student.name)}</div>
+        <div><span class="muted">Semester</span><br>${e(student.semester)}</div>
+        <div><span class="muted">Section</span><br>${e(student.section)}</div>
       </div>
     </div>
 
@@ -48,4 +53,4 @@ requireAuth().then((student) => {
       submitBtn.textContent = "Submit request";
     }
   });
-});
+}).catch(error => errorState(content, error));

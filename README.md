@@ -1,150 +1,164 @@
-# Digital No-Due — working code
+# Digital No-Due Form
 
-This is a real, runnable implementation of the app from your Stitch designs and the 10-day guide: plain HTML/CSS/JavaScript + Firebase (Auth + Firestore + Hosting only — no billing card, ever). No npm install, no build step. Read this top to bottom before running anything — it's short.
+Existing HTML/CSS/vanilla JavaScript ES-module project extended with centrally managed academic profiles, classes, marks and assignments. Firebase Authentication, Firestore and Hosting remain the backend. The frontend has **no npm installation or build step**. Optional npm dependencies under `tests/` are exclusively for local emulators and automated tests.
 
-## What's in this folder
+The college provisioning extension adds an admin-only callable Cloud Function, account creation without copied UIDs, validated bulk student/offering imports, automatic enrollment, activation email, Forgot Password and Change Password. Normal Admin is now the provisioning UI; raw-record/legacy controls remain in **Advanced record editing & legacy compatibility**. Server dependencies are installed separately under `functions/`.
 
-```
-login.html                 Login
-student-dashboard.html     Student's status tracker
-create-request.html        Submit a new request
-approver-dashboard.html    Shared queue: subject faculty, library, labs, accounts
-mentor-dashboard.html      Mentor's soft-skill approval
-hod-dashboard.html         Coordinator/HOD final approval
-office-dashboard.html      Hall ticket verification
+Start with [the provisioning and professor-demo guide](docs/PROVISIONING.md), [exact extension file inventory](docs/PROVISIONING-CHANGES.md), and [pre-change audit](docs/PROVISIONING-AUDIT.md). Confirmed ISE 2022 Semester 5 C source rows are in `templates/ise-5c-2022-confirmed.csv`; unresolved faculty/codes/assessments remain blank and cannot be imported. The original synthetic fixture is separate.
 
-css/style.css              All styling (the navy/white theme from your designs)
-js/firebase-config.js      ← you edit this first
-js/auth.js                 Login, logout, route guard, role-based redirect
-js/workflow.js             The actual hierarchy logic — read this file to understand the app
-js/student.js               |
-js/create-request.js        |  one file per page, wired to workflow.js
-js/approver.js               |
-js/mentor.js                 |
-js/hod.js                    |
-js/office.js                 |
+## Roles and pages
 
-firestore.rules             Security rules
-firebase.json                Hosting + rules deploy config
-manifest.json                Makes it installable as a PWA
-```
+| Role | Features |
+| --- | --- |
+| Student | Dashboard, read-only profile/mentor/subjects/marks/assignments, automatic No-Due request, approval tracker, rejection reasons, resubmission, private notifications |
+| Subject faculty | Existing approval desk; `academic.html` shows profile, assigned subject/semester/section classes, paginated students, configurable assessment marks and assignments |
+| Mentor | Existing mentor approval desk; paginated mentee directory, full mentee academic/clearance details; independently assigned teaching classes can edit their own marks |
+| Admin | Linked accounts/student profiles, staff/mentors, subjects, class/teacher mappings, enrollments, assignments, workflow configuration, reviewed CSV import, clearance-plan preparation and explicit legacy-request upgrade; academic page can correct marks |
+| HOD | Assigned requests at `pending_hod`; approval/rejection with mandatory reason |
+| Office | Assigned cleared requests, exact-USN lookup and final issuance |
+| Library/labs/accounts | Existing Stage 1 approval desk with explicit assigned account UIDs |
 
----
+`student-dashboard.html#profile` retains the existing profile-photo controls. Photos are local to the browser and scoped to the signed-in UID. `academic.html` is the shared academic view; `academic.html?student=AUTH_UID` opens an authorized mentee. Mentors can use “My teaching classes & marks” for their independently assigned subjects.
 
-## Step 1 — Create the Firebase project (5 minutes)
+## Initial setup and account linking
 
-1. Go to [console.firebase.google.com](https://console.firebase.google.com) → **Add project** → give it a name → skip Google Analytics.
-2. **Build → Authentication** → Get started → enable **Email/Password**.
-3. **Build → Firestore Database** → Create database → start in **test mode** (you'll deploy the real rules in Step 5).
-4. **Project settings (gear icon) → General → Your apps → Web (`</>`)** → register an app (no need for Hosting setup here) → copy the `firebaseConfig` object it shows you.
+1. Use the existing Firebase project and web configuration in `js/firebase-config.js`. Enable Email/Password Authentication and Firestore. Use restrictive rules rather than test mode.
+2. Create the first administrator in **Firebase Console → Authentication → Users → Add user**. Copy the actual Authentication UID.
+3. In Firestore Console create `users/THAT_UID` with `role: "admin"`, `name`, `email`, `phone`, `facultyId` and `department`. This one bootstrap requires privileged Console access; signing in does not grant admin access automatically.
+4. Deploy the rules and indexes using the commands below. Log in to `login.html` with the administrator's email/password.
+5. Configure **Institution policy**, then use **Provision college account** or the validated CSV importer. The callable backend creates Auth users and links UIDs automatically. Production activation uses configured SMTP and Secret Manager. **Staff & accounts** remains under Advanced editing for explicit existing-UID linking.
+6. Use role `mentor` for mentors. A mentor can also teach when explicitly assigned to a class; that never grants permission to edit other subjects. Teachers use `subject_faculty`. Create the HOD, office, library, physics lab, chemistry lab and accounts profiles too.
+7. Use Admin → **Students** to link each actual student Auth UID to name, USN, email, phone, numeric semester, section and the mentor's Auth UID. Student records are `students/{authUid}`; a USN is not an Auth UID. Editing a student invalidates their prepared clearance plan until refreshed.
 
-## Step 2 — Paste your config
+### Subjects, sections and marks
 
-Open `js/firebase-config.js` and replace the placeholder values with what you just copied. This file is safe to be public — it's an identifier, not a secret. Your real security is `firestore.rules`.
+1. **Subjects**: choose a stable ID, subject name and code, e.g. ID `dbms`, code `DBMS`.
+2. **Classes & teachers**: choose an offering ID such as `dbms-6-C`; provide subject ID, semester `6`, section `C`, and teacher Auth UID. One offering represents one subject/semester/section and one assigned teacher.
+3. Enter assessment components one per line as `id, label, maximum`, for example:
 
-## Step 3 — Create test accounts and data
+   ```text
+   ia1, Internal Assessment 1, 30
+   ia2, Internal Assessment 2, 30
+   assignment, Assignment, 10
+   ```
 
-You need this before anything will show up on screen. Do it manually in the console for now (this is what the Admin panel would automate later).
+   Supports 1–10 configurable components; IDs are stable letters/numbers/underscore/hyphen. Existing mark values should be reviewed before changing component IDs or maxima.
+4. **Workflow assignments**: save actual UIDs for the four service desks, HOD and office. The current institution has one configured HOD/office/service account per workflow; faculty and mentors vary by student/class.
+5. **Student subjects**: enter student UID and offering ID. Semester and section must match the student profile. Enrolling prepares the student's plan when workflow configuration is complete. Deactivate outdated enrollments instead of deleting them.
+6. Use **Refresh academic mappings & clearance plan** for each affected student after changing a mentor, teaching assignment, class or enrollment. Editing a class invalidates only its enrolled students' plans and removes the prior teacher's derived scope until refreshed. Changed workflow desk UIDs also require fresh plans. Preparation derives teacher/subject mappings from active enrollments and creates the trusted plan. A student can have 1–30 current subjects. If renaming a subject or changing its code, edit its affected offerings to refresh their display snapshots, then refresh the students' plans.
+7. **Assignments**: save a stable assignment ID, offering ID, title, description, due date and optional informational status. These are class notices, not an LMS or file-submission system.
+8. Teachers log in, open **Profile, My Students & Marks**, select a class, enter marks, and click **Save marks**. Blank components remain unentered. Rules enforce the current enrollment, teacher, subject, semester, section, component IDs and allowed mark range. Admins can correct marks through `academic.html`.
 
-**A. Create sign-in accounts** — Authentication → Users → Add user, for each of these (use any password, e.g. `test1234`):
-- `student@test.com` (this will be your test student)
-- `physics@test.com`, `library@test.com`, `mentor@test.com`, `hod@test.com`, `office@test.com`, plus one per subject teacher if you want to test more than one subject
+Advanced admin lists use 30-record pages and exact-ID lookup. The retained legacy UID-based CSV importer uses headers `uid,name,usn,email,phone,semester,section,mentorId`; quoted commas, escaped quotes and multiline CSV fields are supported. Preview before importing. Imports merge profiles, invalidate their plans and never infer UID from USN. They run sequentially and report progress; a failed row stops the import and earlier successful rows remain saved. Assign subjects and refresh plans afterward.
 
-Copy each user's **UID** from the console — you'll need it below.
+## Firestore schema
 
-**B. Create their profile documents** — Firestore Database → Start collection → `users` → document ID = the UID you copied:
+| Path | Purpose and principal fields |
+| --- | --- |
+| `users/{authUid}` | Auth-linked role and staff contact/profile fields; only admin may manage roles |
+| `students/{authUid}` | Canonical student personal/academic profile: name, USN, email, phone, semester, section, mentorId; derived bounded teacherIds/offeringIds |
+| `subjects/{subjectId}` | Stable subject identity, name, code |
+| `offerings/{offeringId}` | subjectId, subjectCode/name, semester, section, teacherId, components and componentIds |
+| `enrollments/{studentUid}__{offeringId}` | studentId, offeringId, teacherId, mentorId, semester, section, subjectId/code, active |
+| `marks/{enrollmentId}` | studentId, offeringId, teacherId, mentorId, subjectId/code, semester/section, `scores: {componentId: number}`, updatedBy/updatedAt |
+| `assignments/{assignmentId}` | offeringId, title, description, dueDate (ISO date), optional class-wide status |
+| `settings/workflow` | Configured library/lab/accounts UIDs plus hodId and officeId |
+| `students/{authUid}/clearance/plan` | Admin-derived approver items, initial pending states, assigned UIDs, semester/section/mentor, valid flag |
+| `noDueRequests/{requestId}` | Existing fields/statuses plus schemaVersion 2, immutable approver/academic snapshot, approvalStates, resubmissionStates, remaining counter, version and lastEvent |
+| `noDueRequests/{requestId}/approvals/{approvalId}` | Existing approval audit subcollection retained; current decisions mirror the authoritative request map |
+| `users/{studentUid}/notifications/{requestId}_{version}` | Immutable event: owning student/request ID, actor UID/name/type, subject code, reason, status, timestamp/version |
 
-```
-users/{studentUid}
-  role: "student"
-  name: "Rahul S."
-  usn: "1MS21CS001"
-  semester: 6
-  section: "B"
-  mentorId: "{mentorUid}"     ← paste the mentor's UID here
+Teacher/mentor profiles reuse `users`; no duplicate teachers collection is necessary. Offerings and enrollments hold stable references, with selected display/scope fields maintained by admin to support indexed queries. Request snapshots preserve historical assignments. A current-class reassignment changes marks permissions immediately; refresh affected profiles/enrollments/plans before using academic screens. Existing request assignees remain responsible for that request unless an administrator explicitly corrects the historical assignment.
 
-users/{physicsUid}
-  role: "physics_lab"
-  name: "Prof. Anita R."
+## Workflow and security
 
-users/{libraryUid}
-  role: "library"
-  name: "Library Desk"
-
-users/{mentorUid}
-  role: "mentor"
-  name: "Dr. Smith"
-
-users/{hodUid}
-  role: "hod"
-  name: "Dr. Rao"
-
-users/{officeUid}
-  role: "office"
-  name: "Exam Office"
+```text
+pending_stage1 → pending_mentor → pending_hod → cleared → issued
+      any approval rejection → rejected → resubmit at rejected stage
 ```
 
-For a subject teacher, also add `subjectCode` (must match one used in `js/workflow.js`, e.g. `"CS61"`):
-```
-users/{teacherUid}
-  role: "subject_faculty"
-  name: "Prof. Iyer"
-  subjectCode: "CS61"
-```
+Required subject approvers come from the student's admin-prepared enrollments; students never select academic values or approvers. Four required service approvals run in parallel with subjects. The request stores a bounded approval-state map and remaining counter. Each decision, counter/stage update, audit projection and private notification commits in one transaction. Firestore rules verify the specific assigned approver, changed fields, counter change, and notification via `getAfter`; there is no independent client stage-advance operation. Rejection requires a nonblank reason. Resubmission resets rejected decisions and preserves approved items. Mentor/HOD rejection resumes that stage.
 
-The default subjects configured in `workflow.js` are for Semester 6, Section B (`CS61`–`CS68`, matching your dashboard mockup: Computer Networks, DBMS, Software Engineering, System Software, Web Technology, Data Mining, Cloud Computing, Open Elective). Edit `REQUIRED_APPROVERS_BY_KEY` in `js/workflow.js` to match your actual subjects/semesters — that object *is* your workflow configuration for now.
+Students cannot modify profiles, roles or marks. Teachers can write marks only for their current active offering/enrollment and matching student semester/section. A mentor can read assigned mentees' marks and can edit only independently assigned teaching subjects. Notifications can only be read by their owning student or admin. Records are not deleted from the client. Admin is a trusted institutional manager with correction access; safeguard admin credentials.
 
-## Step 4 — Run it locally
+Indexes are committed in `firestore.indexes.json` and referenced by `firebase.json`. Queries use authenticated IDs, offering IDs and mentor IDs with limits. Approval listeners are detached on page unload. The faculty queue has a load-more control; mentor/HOD/office desks show up to 30 actionable requests and replenish as requests are processed. Use the academic mentee directory for pagination beyond the mentor dashboard's first 30.
 
-You can't just double-click the HTML files — ES modules require a real server, even a local one.
+## Existing data and migration
 
-1. Install the **Live Server** extension in VS Code.
-2. Open this folder in VS Code.
-3. Right-click `login.html` → **Open with Live Server**.
-4. Log in as your test student and walk through: submit a request → open a second browser tab (or an incognito window) → log in as `physics@test.com` → approve/reject → watch the student dashboard update live.
+No production data is automatically modified. Existing request fields, approval documents and statuses remain. Older requests can still be read by their owner/assigned mentor; full new staff authorization requires the explicit compatibility upgrade.
 
-**The full chain to test:** student submits → all Stage 1 approvers act → mentor's queue picks it up automatically → mentor approves → HOD's queue picks it up → HOD approves → office searches the USN → sees "Eligible" → issues the ticket.
+1. Back up existing data before administrative corrections.
+2. Link legacy student records to their real Authentication UIDs using Admin → Students, keeping old USN-keyed records for reference. Populate subjects/offerings/enrollments and prepare a clearance plan. Nothing automatically deletes old records or copies guessed identities.
+3. In **Legacy request compatibility**, enter an existing request ID. Review the student, status and current mappings in the confirmation. The helper matches old approver types/subject codes, preserves existing approval document IDs, statuses and reasons, and adds verified UID assignments/state counters. Unmatched mappings abort; correct them first.
+4. Old requests with multiple rejected items are supported. Their next resubmission resets all rejected items together. Legacy rejection reasons remain in their existing approval records; new notifications begin with the next action (old events are not fabricated).
 
-**If a screen shows a Firestore error mentioning "index"** — this is normal and expected the first time. Firestore prints a direct link in that error message; click it, click "Create index," wait about a minute, refresh. This happens for the approver, mentor, and HOD queues since they filter on more than one field.
+## Run locally
 
-## Step 5 — Deploy the security rules
+For the existing configured Firebase project, serve the repository with VS Code Live Server or:
 
-Test mode (from Step 1) allows anyone to read/write everything — fine for local testing, not fine to ship. Deploy the real rules:
-
-```
-npm install -g firebase-tools
-firebase login
-firebase use --add        # pick your project when prompted
-firebase deploy --only firestore:rules
+```powershell
+cd "C:\Users\Hp\Desktop\College Projects\Digital-No-Due-Form"
+python -m http.server 5500 --bind 127.0.0.1
 ```
 
-## Step 6 — Deploy the app itself
+Open `http://127.0.0.1:5500/login.html`. This mode uses your configured live Firebase project. Never open HTML by double-clicking; ES modules require HTTP.
 
-```
-firebase deploy --only hosting
-```
+### Safe local demo and tests
 
-You'll get a live URL like `your-project.web.app`. Open it on a phone and use the browser menu → **Add to Home Screen** — it now behaves like an installed app, for free, with no Play Store involved.
+Install Node.js and Java 21 or newer for Firebase emulators. The verified environment used Node 24 and Java 26. In one PowerShell terminal:
 
----
-
-## How the hierarchy actually works (read this to understand, not just copy-paste)
-
-Every request moves through exactly these statuses, in `js/workflow.js`:
-
-```
-pending_stage1  →  pending_mentor  →  pending_hod  →  cleared  →  issued
-      ↓                  ↓                ↓
-                     rejected
+```powershell
+cd "C:\Users\Hp\Desktop\College Projects\Digital-No-Due-Form\tests"
+npm ci
+npm run preview
 ```
 
-- **Stage 1** (`approver.js`) — subject faculty, library, labs, accounts each own one document in the request's `approvals` subcollection. They act independently; nothing is gated between them.
-- After every Stage 1 approve/reject, `checkAndAdvance()` re-checks all Stage 1 items. Any rejection → `rejected`. All approved → `pending_mentor`.
-- **Mentor** (`mentor.js`) only ever queries for requests already at `pending_mentor` — so a mentor literally cannot act early, there's nothing for them to query.
-- Same pattern for **HOD** (`hod.js`) at `pending_hod`, and **Office** (`office.js`), which only enables its "Issue" button when `status === "cleared"`.
+Install server dependencies first with `npm ci` from the project's `functions/` folder. The expanded preview includes Functions on 5001 and exports/imports state at `local-emulator-backup/current`. Prefer `npm run audit` for all 26 extension tests on isolated ports/project, keeping the browser demo untouched. `npm run seed:bulk` provisions 50 synthetic ISE students across A/B/C with separate synthetic offerings. See the provisioning guide for exact credentials and production steps.
 
-This is what "the hierarchy can't be skipped" actually looks like in code — not a UI restriction, but each screen's query literally can't see a request that isn't at the right stage yet.
+In another terminal in `tests/`:
 
-## What's intentionally not built yet
+```powershell
+npm test
+npm run seed
+```
 
-Matches "cut for v2" in the 10-day guide: Admin panel (use the Firestore console), configurable workflow builder (edit the object in `workflow.js` instead), QR codes, PDF certificates, push notifications, audit log screen. The data model already has what a v2 audit log or notification system would read from (`actedBy`, `actedAt`, `remarks` on every approval) — you're not blocked on adding those later.
+`npm test` clears **only the demo Firestore emulator** and seeds isolated fixtures. Run tests before seeding your browser demo. `npm run seed` creates or reuses demo-only accounts and populates two Semester 5 Section C students, three separately taught subjects, marks, assignments and complete approval mappings. Reseeding resets known demo academic fixtures and preserves request/notification history. Run `npm run verify:demo` to check all logins, academic records, teacher updates and notification privacy. The expanded preview exports/imports state on normal shutdown/restart; forced termination can lose changes since the last export. Stop them with Ctrl+C; if Windows leaves Java holding 8180, verify that the process command identifies this project's demo Firestore emulator before stopping that specific process.
+
+Open `http://127.0.0.1:5050/login.html?emulator=1`. Demo account emails are `student@demo.test`, `subject_faculty@demo.test`, `mentor@demo.test`, `admin@demo.test`, `hod@demo.test`, `office@demo.test`, and the four service roles at `@demo.test`. All demo passwords: `DemoPassword123!`. These accounts only exist locally. Emulator UI is `http://127.0.0.1:4500`.
+
+The browser retains emulator mode for that localhost tab's session. Local port 5050 always selects the demo emulators, including fresh tabs, and uses a dummy API key. Hosted production always uses the existing Firebase web configuration; the emulator switch only works on localhost/127.0.0.1. See [the complete local demo walkthrough](docs/LOCAL-DEMO.md) for every credential, seeded record and rejection/resubmission/issuance step.
+
+Alternatively, with no emulators already running:
+
+```powershell
+cd tests
+npm run emulators
+```
+
+This starts Auth/Firestore, runs the suite, and shuts the CLI down. Test dependencies are not deployed by Hosting. Expected permission-denied logs are assertions proving unauthorized actions fail.
+
+See [validation report](docs/VALIDATION.md) for scenario coverage and limits. The emulator does not enforce production composite-index availability; deploy the committed indexes and wait for them to build.
+
+## Deploy to the existing Firebase project
+
+Use a Firebase Console account authorized for your existing project. Do not create another production project.
+
+Provisioning deployment also requires the institutional Functions codebase, `SMTP_PASSWORD` secret and actual institution email policy. Follow the complete production sequence in [PROVISIONING.md](docs/PROVISIONING.md) before using the new account/import dashboard on the live project.
+
+```powershell
+cd "C:\Users\Hp\Desktop\College Projects\Digital-No-Due-Form\tests"
+npx firebase login
+npx firebase projects:list
+npx firebase deploy --project digital-no-due-shayan --config ../firebase.json --only firestore:rules,firestore:indexes
+npx firebase deploy --project digital-no-due-shayan --config ../firebase.json --only hosting
+```
+
+Replace the project ID only if your existing project differs from `js/firebase-config.js`. Prepare/link production records using Console/bootstrap and the admin page; the local demo seed must never be repurposed as a production import. Rules and indexes must be deployed alongside the app before using the new features. Hosting ignores tests, docs, caches, logs and rules files.
+
+## Handover
+
+- [Audit and implementation decisions](docs/AUDIT.md)
+- [Exact created/modified file list](docs/CHANGES.md)
+- [Validation and scenario checklist](docs/VALIDATION.md)
+
+Limitations: Custom activation delivery requires institution SMTP and server Secret Manager configuration; one institution-level service/HOD/office workflow configuration; assignments have informational class-wide status, no per-student submission tracking; notifications show the latest 30 events and can be refreshed; current student academic views show up to 30 active subjects and the latest 50 assignments per subject. No production deployment, live-data migration or live-account validation is performed automatically. The manifest's icon paths already lacked corresponding files in the repository; app installation artwork remains a separate asset task.

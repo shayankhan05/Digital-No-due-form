@@ -18,6 +18,16 @@
 }
 
 * { box-sizing: border-box; }
+.academic-links { max-width:660px; margin:auto; padding:10px 24px; background:var(--white); font-size:13px; }
+.academic-links a { color:var(--navy); }
+body:has(.academic-links) .app-shell { height:calc(100dvh - 40px); }
+.table-scroll { overflow-x:auto; }
+.table-scroll table { width:100%; border-collapse:collapse; }
+.table-scroll th, .table-scroll td { padding:10px; border-bottom:1px solid var(--border); text-align:left; }
+.academic-subject { padding:12px 0; border-top:1px solid var(--border); }
+.tab-strip { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
+select { width:100%; padding:10px; margin:6px 0 14px; color:var(--text); background:var(--white); border:1px solid var(--border); border-radius:6px; }
+.class-button { margin:4px; }
 
 html, body {
   margin: 0;
@@ -207,3 +217,1447 @@ textarea { resize: vertical; min-height: 60px; }
 .hidden { display: none !important; }
 .reject-box { border: 1px solid var(--red-text); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fff9f9; }
 .actions-right { display: flex; gap: 8px; justify-content: flex-end; }
+
+
+
+/* ==================================================
+   STUDENT DIRECTORY / CSV UPLOAD
+================================================== */
+
+.student-directory {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px 18px 24px;
+}
+
+.student-directory h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--navy);
+}
+
+.directory-subtitle {
+  margin: 0 0 18px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+
+/* ---------- Student search ---------- */
+
+.search-box {
+  margin-bottom: 10px;
+}
+
+.search-box input {
+  margin-bottom: 0;
+  background: var(--white);
+}
+
+#studentSearchResults {
+  margin-top: 10px;
+}
+
+
+/* ---------- CSV upload ---------- */
+
+.csv-upload-box {
+  margin-top: 20px;
+  padding: 16px;
+  background: var(--bg);
+  border: 1px dashed #a9b6c6;
+  border-radius: 10px;
+}
+
+.csv-upload-box h3 {
+  margin: 0 0 5px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--navy);
+}
+
+.csv-upload-box p {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.csv-upload-box input[type="file"] {
+  margin: 0;
+  background: var(--white);
+}
+
+
+/* ---------- CSV preview ---------- */
+
+#csvPreview {
+  margin-top: 18px;
+}
+
+#csvPreview h3 {
+  font-size: 15px;
+  color: var(--navy);
+}
+
+
+/* ---------- Student result card ---------- */
+
+.student-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.student-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+
+  padding: 12px 14px;
+  margin-top: 8px;
+
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.student-card strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.student-card p {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.student-card small {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+
+/* ---------- View student button ---------- */
+
+.view-student-btn {
+  flex-shrink: 0;
+
+  padding: 7px 12px;
+
+  background: var(--navy);
+  color: var(--white);
+
+  border: none;
+  border-radius: 7px;
+
+  font-size: 12px;
+}
+
+.view-student-btn:hover {
+  background: var(--navy-dark);
+}
+
+
+/* ---------- No search result ---------- */
+
+.empty-search {
+  padding: 14px;
+  margin-top: 8px;
+
+  text-align: center;
+
+  border: 1px solid var(--border);
+  border-radius: 10px;
+
+  color: var(--text-muted);
+  font-size: 13px;
+
+  background: var(--white);
+}
+
+
+/* ---------- Student details popup ---------- */
+
+.student-details-modal {
+  display: none;
+
+  position: fixed;
+  inset: 0;
+
+  z-index: 9999;
+
+  padding: 20px;
+
+  background: rgba(22, 41, 63, 0.45);
+
+  align-items: center;
+  justify-content: center;
+}
+
+.student-details-modal.show {
+  display: flex;
+}
+
+.student-detail-card {
+  position: relative;
+
+  width: 100%;
+  max-width: 420px;
+  max-height: 80vh;
+
+  overflow-y: auto;
+
+  padding: 22px;
+
+  background: var(--white);
+
+  border-radius: 14px;
+
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.15);
+}
+
+.student-detail-card h2 {
+  margin: 0 35px 15px 0;
+
+  color: var(--navy);
+
+  font-size: 19px;
+  font-weight: 500;
+}
+
+.student-detail-card h3 {
+  margin-top: 18px;
+
+  color: var(--navy);
+
+  font-size: 14px;
+}
+
+.student-detail-card p {
+  font-size: 13px;
+}
+
+.student-detail-card ul {
+  padding-left: 20px;
+
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+
+/* ---------- Close popup ---------- */
+
+.close-details {
+  position: absolute;
+
+  top: 10px;
+  right: 12px;
+
+  padding: 3px 8px;
+
+  border: none;
+  background: transparent;
+
+  font-size: 24px;
+  color: var(--text-muted);
+}
+
+.close-details:hover {
+  color: var(--text);
+}
+
+
+/* ---------- Future No-Due status ---------- */
+
+.status-message {
+  padding: 10px;
+
+  background: #eef4fb;
+
+  border: 1px solid #d3e2f2;
+  border-radius: 8px;
+
+  color: var(--navy);
+
+  font-size: 12px;
+}
+
+
+/* ---------- Mobile ---------- */
+
+@media (max-width: 480px) {
+
+  .student-directory {
+    margin: 14px 12px 20px;
+  }
+
+  .student-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .view-student-btn {
+    width: 100%;
+  }
+}
+
+
+/* ==========================================================
+   DIGITAL NO-DUE — MODERN UI + DARK MODE
+   ========================================================== */
+
+:root {
+  --accent: #1e3a5f;
+  --accent-hover: #162f50;
+  --surface: #ffffff;
+  --surface-soft: #f8fafc;
+  --shadow-soft: 0 8px 28px rgba(15, 23, 42, 0.06);
+  --shadow-hover: 0 12px 32px rgba(15, 23, 42, 0.10);
+}
+
+
+/* ---------- Smooth theme transitions ---------- */
+
+body,
+.app-shell,
+.top-bar,
+.bottom-nav,
+.card,
+.stat-card,
+.list,
+.row,
+input,
+textarea,
+select,
+button {
+  transition:
+    background-color 0.25s ease,
+    color 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+
+/* ---------- Wider / cleaner app ---------- */
+
+.app-shell {
+  max-width: 660px;
+}
+
+.app-content {
+  padding: 22px 24px 30px;
+}
+
+
+/* ---------- Modern top bar ---------- */
+
+.top-bar {
+  padding: 16px 24px;
+  box-shadow: 0 1px 8px rgba(15, 23, 42, 0.04);
+}
+
+.top-bar .brand {
+  font-weight: 650;
+  font-size: 16px;
+}
+
+
+/* ---------- Better cards ---------- */
+
+.card {
+  border-radius: 18px;
+  padding: 22px;
+  margin-bottom: 18px;
+  box-shadow: var(--shadow-soft);
+}
+
+.card h2 {
+  margin-top: 0;
+  color: var(--text);
+}
+
+
+/* ---------- Student welcome/profile card ---------- */
+
+.profile-summary-card {
+  position: relative;
+  overflow: hidden;
+  padding: 26px;
+}
+
+.profile-summary-card::before {
+  content: "";
+  position: absolute;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  right: -60px;
+  top: -70px;
+  background: rgba(30, 58, 95, 0.07);
+}
+
+.student-welcome {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.profile-avatar {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  flex-shrink: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  overflow: hidden;
+
+  background: linear-gradient(135deg, #dbeafe, #e0e7ff);
+  color: var(--navy);
+
+  font-size: 22px;
+  font-weight: 700;
+
+  border: 3px solid var(--white);
+  box-shadow: 0 5px 18px rgba(30, 58, 95, 0.13);
+}
+
+.profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.student-welcome-text h2 {
+  margin: 0 0 5px;
+  font-size: 22px;
+}
+
+.student-welcome-text p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+
+/* ---------- Student info chips ---------- */
+
+.student-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.student-meta-item {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  padding: 12px 14px;
+}
+
+.student-meta-item span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-bottom: 3px;
+}
+
+.student-meta-item strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+
+/* ---------- Section headings ---------- */
+
+.modern-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.modern-section-title h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.modern-section-title span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+
+/* ---------- Better subject cards ---------- */
+
+.subject-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.subject-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+
+  padding: 13px;
+
+  border: 1px solid var(--border);
+  border-radius: 13px;
+
+  background: var(--surface-soft);
+}
+
+.subject-icon {
+  width: 38px;
+  height: 38px;
+
+  border-radius: 11px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  flex-shrink: 0;
+
+  background: #e6eef9;
+  color: var(--navy);
+
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.subject-info {
+  min-width: 0;
+}
+
+.subject-info strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 3px;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subject-info span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+
+/* ==========================================================
+   FULL PROFILE PAGE
+   ========================================================== */
+
+.profile-page {
+  padding-bottom: 10px;
+}
+
+.profile-hero {
+  text-align: center;
+  padding: 28px 20px;
+}
+
+.profile-photo-large {
+  width: 104px;
+  height: 104px;
+
+  margin: 0 auto 14px;
+
+  border-radius: 50%;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  overflow: hidden;
+
+  background: linear-gradient(135deg, #dbeafe, #e0e7ff);
+  color: var(--navy);
+
+  font-size: 32px;
+  font-weight: 700;
+
+  border: 4px solid var(--white);
+  box-shadow: 0 7px 24px rgba(30, 58, 95, 0.18);
+}
+
+.profile-photo-large img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-hero h2 {
+  margin: 0 0 4px;
+  font-size: 21px;
+}
+
+.profile-hero .profile-email {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+
+/* ---------- Upload / remove buttons ---------- */
+
+.photo-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 15px;
+}
+
+.photo-actions button {
+  font-size: 12px;
+  padding: 8px 12px;
+}
+
+.photo-upload {
+  background: var(--navy);
+  color: #fff;
+  border-color: var(--navy);
+}
+
+.photo-remove {
+  background: transparent;
+  color: var(--red-text);
+  border-color: #efb8b8;
+}
+
+
+/* ---------- Profile information ---------- */
+
+.profile-details {
+  overflow: hidden;
+  padding: 0;
+}
+
+.profile-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--border);
+
+  gap: 20px;
+}
+
+.profile-info-row:last-child {
+  border-bottom: none;
+}
+
+.profile-info-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.profile-info-value {
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+}
+
+
+/* ==========================================================
+   MENTEE CARDS
+   ========================================================== */
+
+.mentee-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.mentee-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  padding: 14px;
+
+  background: var(--surface-soft);
+
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.mentee-avatar {
+  width: 42px;
+  height: 42px;
+
+  border-radius: 50%;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  flex-shrink: 0;
+
+  background: #e6eef9;
+  color: var(--navy);
+
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.mentee-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.mentee-main strong {
+  font-size: 13px;
+}
+
+.mentee-main p {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+
+/* ==========================================================
+   THEME BUTTON
+   ========================================================== */
+
+.theme-toggle {
+  width: 38px;
+  height: 38px;
+
+  padding: 0;
+
+  border-radius: 50%;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: 17px;
+
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+
+  cursor: pointer;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
+/* ==========================================================
+   DARK MODE
+   ========================================================== */
+
+body.dark-theme {
+
+  --bg: #090d14;
+
+  --white: #111827;
+
+  --surface: #111827;
+
+  --surface-soft: #171f2d;
+
+  --border: #273244;
+
+  --text: #f8fafc;
+
+  --text-muted: #9ca8ba;
+
+  --navy: #5b8def;
+
+  --navy-dark: #78a2f4;
+
+  --gray-bg: #1d2735;
+
+  --gray-text: #aab4c4;
+
+  --green-bg: #102d22;
+  --green-text: #68d89b;
+
+  --orange-bg: #352411;
+  --orange-text: #f4a340;
+
+  --red-bg: #351719;
+  --red-text: #ff8188;
+}
+
+body.dark-theme .app-shell {
+  background: var(--bg);
+}
+
+body.dark-theme .top-bar,
+body.dark-theme .bottom-nav,
+body.dark-theme .card,
+body.dark-theme .list,
+body.dark-theme .stat-card {
+  background: var(--surface);
+}
+
+body.dark-theme .banner {
+  background: #14233b;
+  border-color: #243d65;
+  color: #8fb5ff;
+}
+
+body.dark-theme .subject-item,
+body.dark-theme .student-meta-item,
+body.dark-theme .mentee-card {
+  background: var(--surface-soft);
+}
+
+body.dark-theme .subject-icon,
+body.dark-theme .mentee-avatar {
+  background: #203454;
+  color: #8fb5ff;
+}
+
+body.dark-theme .profile-avatar,
+body.dark-theme .profile-photo-large {
+  background: linear-gradient(135deg, #1c3151, #272d54);
+  color: #a8c5ff;
+  border-color: #273244;
+}
+
+body.dark-theme input,
+body.dark-theme textarea,
+body.dark-theme select {
+  background: #171f2d;
+  color: var(--text);
+}
+
+body.dark-theme .btn-primary,
+body.dark-theme .photo-upload {
+  background: #376bd1;
+}
+
+body.dark-theme .bottom-nav a.active {
+  color: #78a2f4;
+}
+
+
+/* ==========================================================
+   MOBILE
+   ========================================================== */
+
+@media (max-width: 520px) {
+
+  .app-content {
+    padding: 16px 14px 24px;
+  }
+
+  .card {
+    padding: 18px;
+  }
+
+  .subject-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .student-meta-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .profile-info-row {
+    align-items: flex-start;
+  }
+}
+
+
+/* =========================================
+   PROFILE CARD SPACING FIX
+========================================= */
+
+.profile-details {
+  padding: 28px 30px;
+}
+
+.profile-details .modern-section-title {
+  margin-bottom: 22px;
+}
+
+.profile-details .modern-section-title h2 {
+  margin: 0;
+  line-height: 1.3;
+}
+
+/* =========================================================
+   ACHARYA ERP INSPIRED DARK THEME
+   Black + Charcoal + Orange
+========================================================= */
+
+body.dark-theme {
+  background: #080808;
+  color: #f5f5f5;
+}
+
+/* Main application background */
+body.dark-theme .app-shell {
+  background: #080808;
+}
+
+/* Top navigation */
+body.dark-theme .top-bar {
+  background: #101010;
+  border-bottom: 1px solid #292929;
+  color: #ffffff;
+}
+
+body.dark-theme .brand {
+  color: #ffffff;
+}
+
+body.dark-theme .brand svg {
+  stroke: #ff9838;
+}
+
+/* Main content */
+body.dark-theme .app-content {
+  background: #080808;
+}
+
+/* Cards */
+body.dark-theme .card,
+body.dark-theme .profile-summary-card,
+body.dark-theme .profile-details,
+body.dark-theme .stat-card {
+  background: #101010;
+  border: 1px solid #292929;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+/* Main headings */
+body.dark-theme h1,
+body.dark-theme h2,
+body.dark-theme h3 {
+  color: #ffffff;
+}
+
+/* Secondary text */
+body.dark-theme .muted,
+body.dark-theme .section-label,
+body.dark-theme label {
+  color: #a7a7a7;
+}
+
+/* Student name / welcome area */
+body.dark-theme .student-welcome h2,
+body.dark-theme .student-welcome-text h2 {
+  color: #ffffff;
+}
+
+/* Semester / section statistic boxes */
+body.dark-theme .stat-card {
+  background: #0d0d0d;
+  border: 1px solid #292929;
+}
+
+body.dark-theme .stat-card .num {
+  color: #ffffff;
+}
+
+body.dark-theme .stat-card .label {
+  color: #a7a7a7;
+}
+
+/* Subject/request rows */
+body.dark-theme .row,
+body.dark-theme .student-card {
+  background: #0d0d0d;
+  border-color: #292929;
+  color: #ffffff;
+}
+
+/* Small circular subject icon */
+body.dark-theme .avatar {
+  background: #25180d;
+  color: #ff9838;
+}
+
+/* Badges */
+body.dark-theme .badge {
+  background: #1b1b1b;
+  border: 1px solid #303030;
+  color: #d7d7d7;
+}
+
+/* Primary buttons - ERP orange */
+body.dark-theme .btn-primary {
+  background: #ff9838;
+  color: #0b0b0b;
+  border-color: #ff9838;
+}
+
+body.dark-theme .btn-primary:hover {
+  background: #ffa64f;
+  border-color: #ffa64f;
+}
+
+/* Small buttons */
+body.dark-theme .btn-sm {
+  background: #101010;
+  color: #ffffff;
+  border: 1px solid #303030;
+}
+
+body.dark-theme .btn-sm:hover {
+  border-color: #ff9838;
+  color: #ff9838;
+}
+
+/* Form fields */
+body.dark-theme input,
+body.dark-theme select,
+body.dark-theme textarea {
+  background: #0d0d0d;
+  color: #ffffff;
+  border: 1px solid #303030;
+}
+
+body.dark-theme input::placeholder,
+body.dark-theme textarea::placeholder {
+  color: #737373;
+}
+
+body.dark-theme input:focus,
+body.dark-theme select:focus,
+body.dark-theme textarea:focus {
+  border-color: #ff9838;
+  outline: none;
+}
+
+/* Informational banners */
+body.dark-theme .banner {
+  background: #111111;
+  border: 1px solid #303030;
+  color: #d5d5d5;
+}
+
+/* Bottom navigation */
+body.dark-theme .bottom-nav {
+  background: #101010;
+  border-top: 1px solid #292929;
+}
+
+body.dark-theme .bottom-nav a {
+  color: #9a9a9a;
+}
+
+body.dark-theme .bottom-nav a:hover {
+  color: #ffffff;
+}
+
+/* Active navigation = ERP orange */
+body.dark-theme .bottom-nav a.active {
+  color: #ff9838;
+}
+
+body.dark-theme .bottom-nav a.active svg {
+  stroke: #ff9838;
+}
+
+/* Profile avatar */
+body.dark-theme .profile-avatar {
+  background: #1d1d1d;
+  border: 2px solid #ff9838;
+  color: #ff9838;
+}
+
+/* Profile information */
+body.dark-theme .profile-details {
+  background: #101010;
+}
+
+body.dark-theme .profile-details strong {
+  color: #ffffff;
+}
+
+/* Links */
+body.dark-theme a {
+  color: #ff9838;
+}
+
+/* Scrollbar - subtle ERP appearance */
+body.dark-theme ::-webkit-scrollbar {
+  width: 7px;
+}
+
+body.dark-theme ::-webkit-scrollbar-track {
+  background: #080808;
+}
+
+body.dark-theme ::-webkit-scrollbar-thumb {
+  background: #353535;
+  border-radius: 10px;
+}
+
+body.dark-theme ::-webkit-scrollbar-thumb:hover {
+  background: #ff9838;
+}
+/* =========================================================
+   DARK THEME — ACHARYA ERP STYLE
+   ========================================================= */
+
+html[data-theme="dark"],
+body.dark-theme,
+body.dark {
+  background: #050505;
+  color: #ffffff;
+}
+
+html[data-theme="dark"] body,
+body.dark-theme,
+body.dark {
+  background: #050505;
+  color: #ffffff;
+}
+
+/* Main app */
+html[data-theme="dark"] .app-shell,
+body.dark-theme .app-shell,
+body.dark .app-shell {
+  background: #050505;
+}
+
+/* Top navigation */
+html[data-theme="dark"] .top-bar,
+body.dark-theme .top-bar,
+body.dark .top-bar {
+  background: #0d0d0d;
+  border-color: #292929;
+  color: #ffffff;
+}
+
+/* Main content */
+html[data-theme="dark"] .app-content,
+body.dark-theme .app-content,
+body.dark .app-content {
+  background: #050505;
+}
+
+/* Cards */
+html[data-theme="dark"] .card,
+body.dark-theme .card,
+body.dark .card {
+  background: #0d0d0d;
+  border-color: #292929;
+  color: #ffffff;
+}
+
+/* Bottom navigation */
+html[data-theme="dark"] .bottom-nav,
+body.dark-theme .bottom-nav,
+body.dark .bottom-nav {
+  background: #0d0d0d;
+  border-color: #292929;
+}
+
+/* Normal nav items */
+html[data-theme="dark"] .bottom-nav a,
+body.dark-theme .bottom-nav a,
+body.dark .bottom-nav a {
+  color: #a6a6a6;
+}
+
+/* Active navigation — ERP orange */
+html[data-theme="dark"] .bottom-nav a.active,
+body.dark-theme .bottom-nav a.active,
+body.dark .bottom-nav a.active {
+  color: #ff9933;
+}
+
+/* Headings */
+html[data-theme="dark"] h1,
+html[data-theme="dark"] h2,
+html[data-theme="dark"] h3,
+html[data-theme="dark"] .brand,
+body.dark-theme h1,
+body.dark-theme h2,
+body.dark-theme h3,
+body.dark-theme .brand {
+  color: #ffffff;
+}
+
+/* Muted text */
+html[data-theme="dark"] .muted,
+body.dark-theme .muted,
+body.dark .muted {
+  color: #a7a7a7;
+}
+
+/* Banners */
+html[data-theme="dark"] .banner,
+body.dark-theme .banner,
+body.dark .banner {
+  background: #111111;
+  border-color: #303030;
+  color: #eeeeee;
+}
+
+/* Small buttons */
+html[data-theme="dark"] .btn-sm,
+body.dark-theme .btn-sm,
+body.dark .btn-sm {
+  background: #0d0d0d;
+  color: #ffffff;
+  border-color: #303030;
+}
+
+/* Main action buttons */
+html[data-theme="dark"] .btn-primary,
+body.dark-theme .btn-primary,
+body.dark .btn-primary {
+  background: #ff9933;
+  color: #080808;
+  border-color: #ff9933;
+}
+
+/* Inputs */
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select,
+body.dark-theme input,
+body.dark-theme textarea,
+body.dark-theme select {
+  background: #101010;
+  color: #ffffff;
+  border-color: #333333;
+}
+
+/* Rows */
+html[data-theme="dark"] .row,
+body.dark-theme .row,
+body.dark .row {
+  border-color: #292929;
+}
+
+/* Profile avatar */
+html[data-theme="dark"] .profile-avatar,
+body.dark-theme .profile-avatar,
+body.dark .profile-avatar {
+  background: #151515;
+  border-color: #333333;
+  color: #ffffff;
+}
+
+/* Profile/details cards */
+html[data-theme="dark"] .profile-summary-card,
+body.dark-theme .profile-summary-card {
+  background: #0d0d0d;
+  border-color: #292929;
+}
+
+/* Status/stat cards */
+html[data-theme="dark"] .stat-card,
+body.dark-theme .stat-card {
+  background: #0d0d0d;
+  border-color: #292929;
+  color: #ffffff;
+}
+/* =========================================================
+   FIX PROFILE INITIALS IN DARK MODE
+   Keep avatar light with dark initials
+   ========================================================= */
+
+html[data-theme="dark"] .profile-avatar,
+body.dark-theme .profile-avatar,
+body.dark .profile-avatar {
+  background: #eef1f5 !important;
+  color: #071a33 !important;
+  border: 4px solid #24364f !important;
+}
+
+/* Make sure anything inside the avatar inherits dark text */
+html[data-theme="dark"] .profile-avatar *,
+body.dark-theme .profile-avatar *,
+body.dark .profile-avatar * {
+  color: #071a33 !important;
+}
+/* =========================================================
+   MENTOR PROFILE AVATAR INITIALS — FINAL FIX
+   ========================================================= */
+
+/* Light theme */
+#mentorProfileAvatar {
+  background: #eef1f5 !important;
+  color: #071a33 !important;
+  border-color: #dfe3e8 !important;
+}
+
+/* Dark theme */
+html[data-theme="dark"] #mentorProfileAvatar,
+body[data-theme="dark"] #mentorProfileAvatar,
+body.dark-theme #mentorProfileAvatar,
+body.dark #mentorProfileAvatar {
+  background: #eef1f5 !important;
+  color: #071a33 !important;
+  border-color: #24364f !important;
+}
+/* =========================================================
+   MENTOR DASHBOARD AVATAR FIX
+   Keep initials dark in BOTH themes
+   ========================================================= */
+
+#mentorDashboardAvatar {
+  background: #eef1f5 !important;
+  color: #071a33 !important;
+  border: 2px solid #dfe3e8 !important;
+}
+
+html[data-theme="dark"] #mentorDashboardAvatar,
+body.dark-theme #mentorDashboardAvatar {
+  background: #eef1f5 !important;
+  color: #071a33 !important;
+  border-color: #24364f !important;
+}
+body.dark-theme .hod-profile-avatar {
+  background: #f1f5f9 !important;
+  color: #0f2747 !important;
+  border-color: #334155 !important;
+}
+
+/* Institutional account forms retain the existing theme and adapt to narrow screens. */
+#policyForm, #accountForm {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px 20px;
+}
+#policyForm > p, #policyForm > button, #accountForm > button { grid-column: 1 / -1; }
+#policyForm label, #accountForm label { min-width: 0; }
+.provision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-block: 16px;
+}
+.provision-actions > button {
+  flex: 1 1 220px;
+  min-width: 0;
+  white-space: normal;
+}
+
+/* Layout containment only: keep the existing theme, typography and card finish. */
+.app-shell { width: 100%; min-width: 0; max-width: 480px; margin-inline: auto; }
+/* Only the two administration screens need the wider, bounded workspace. */
+body:has(script[src="js/institutional-admin.js"]) .app-shell,
+body:has(script[src="js/admin.js"]) .app-shell { max-width: 1040px; }
+.app-content { min-width: 0; min-height: 0; }
+.app-content > *, .app-content .card, .banner, .list, .row, form {
+  min-width: 0;
+  max-width: 100%;
+}
+.card { width: 100%; overflow-wrap: anywhere; }
+.card :where(div, label, p, h2, h3, span, strong, small),
+.student-welcome-text, .student-meta-item, .profile-info-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+input, select, textarea { min-width: 0; max-width: 100%; }
+button, .btn, .badge { max-width: 100%; overflow-wrap: anywhere; }
+button, .btn { white-space: normal; }
+.badge { white-space: normal; }
+
+.subject-grid {
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+}
+.subject-item { min-width: 0; max-width: 100%; }
+.subject-icon {
+  width: max-content;
+  min-width: 38px;
+  max-width: 90px;
+  height: auto;
+  min-height: 38px;
+  padding: 4px 6px;
+}
+.subject-info { flex: 1 1 0; min-width: 0; }
+.subject-info strong {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.student-meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stat-card { min-width: 0; overflow-wrap: anywhere; }
+.modern-section-title { flex-wrap: wrap; gap: 8px; }
+
+.top-bar { flex-wrap: wrap; gap: 8px; min-width: 0; }
+.top-bar > * { min-width: 0; max-width: 100%; }
+.top-bar .brand { flex: 1 1 170px; overflow-wrap: anywhere; }
+.top-bar .brand svg { flex-shrink: 0; }
+.top-actions, .top-bar > div:not(.brand) { flex-wrap: wrap; }
+.top-bar a { overflow-wrap: anywhere; }
+.academic-links { width: 100%; min-width: 0; max-width: 480px; margin-inline: auto; overflow-wrap: anywhere; }
+body:has(.academic-links) {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+body:has(.academic-links) .academic-links { flex: 0 0 auto; }
+body:has(.academic-links) .app-shell { flex: 1 1 0; height: auto; min-height: 0; }
+.bottom-nav { width: 100%; max-width: 100%; gap: 4px; padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+.bottom-nav a { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+
+.row { flex-wrap: wrap; }
+.row > * { min-width: 0; max-width: 100%; }
+.row > span:not(.badge) { flex: 1 1 180px; overflow-wrap: anywhere; }
+.actions-right { flex-wrap: wrap; }
+.class-button { max-width: calc(100% - 8px); }
+.student-detail-card { min-width: 0; overflow-wrap: anywhere; max-height: min(80vh, calc(100dvh - 40px)); }
+
+.table-scroll {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.table-scroll table { min-width: 480px; }
+#importPreview table { min-width: 720px; }
+#records, #searchResults, #importResults, #csvPreview { min-width: 0; overflow-wrap: anywhere; }
+#policyForm, #accountForm {
+  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
+}
+.provision-actions { width: 100%; align-items: stretch; }
+
+/* Keep the login card and its footer together inside the phone-style frame. */
+.login-wrap {
+  width: 100%;
+  max-width: 480px;
+  margin-inline: auto;
+  min-height: 100dvh;
+  flex-direction: column;
+  gap: 12px;
+}
+.login-wrap .login-card { width: 100%; max-width: 360px; flex: 0 0 auto; }
+.login-wrap > .helper { width: 100%; max-width: 360px; margin: 0; text-align: center; overflow-wrap: anywhere; }
+
+@media (max-width: 520px) {
+  .app-shell, .academic-links, .login-wrap,
+  body:has(script[src="js/institutional-admin.js"]) .app-shell,
+  body:has(script[src="js/admin.js"]) .app-shell { max-width: 100%; margin-inline: 0; }
+  .provision-actions { flex-direction: column; }
+  .provision-actions > button { flex: none; width: 100%; }
+  .profile-info-row { flex-wrap: wrap; gap: 8px; }
+  .profile-info-value { max-width: 100%; }
+}

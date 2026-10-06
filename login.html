@@ -28,14 +28,21 @@
         <button type="submit" class="btn-primary btn-block">Log in</button>
       </form>
 
-      <p class="helper"><a href="#" onclick="alert('Ask your admin to reset it from the Firebase console for now.'); return false;">Forgot password?</a></p>
+      <p class="helper"><button id="forgotPasswordBtn" class="btn-sm" type="button">Forgot password?</button></p>
+      <form id="resetForm" hidden>
+        <label for="resetEmail">Registered college email</label>
+        <input id="resetEmail" type="email" required autocomplete="email">
+        <button type="submit" class="btn-primary">Send password reset</button>
+        <p id="resetStatus" role="status" aria-live="polite"></p>
+      </form>
     </div>
-    <p class="helper" style="position:fixed; bottom:16px; width:100%; left:0;">Secure access for authorized institutional personnel only</p>
+    <p class="helper" style="width:100%;">Secure access for authorized institutional personnel only</p>
   </div>
 
   <script type="module">
-    import { wireLoginForm } from "./js/auth.js";
+    import { wireLoginForm, wireForgotPassword } from "./js/auth.js";
     wireLoginForm();
+    wireForgotPassword();
   </script>
 </body>
 </html>

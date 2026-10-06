@@ -1,33 +1,193 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Digital No-Due — New Request</title>
-<link rel="stylesheet" href="css/style.css" />
-<link rel="manifest" href="manifest.json" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Digital No-Due — New Request</title>
+
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="manifest" href="manifest.json" />
 </head>
+
 <body>
+
 <div class="app-shell">
 
+ 
+
   <div class="top-bar">
-    <a href="student-dashboard.html" style="color:var(--navy); text-decoration:none; font-size:14px;">&larr; Back</a>
-    <span class="brand">New request</span>
+
+    <a
+      href="student-dashboard.html"
+      style="
+        color: var(--navy);
+        text-decoration: none;
+        font-size: 14px;
+      "
+    >
+      &larr; Back
+    </a>
+
+    <span class="brand">
+      New request
+    </span>
+
     <span style="width:44px;"></span>
+
   </div>
 
-  <div class="app-content" id="content">
-    <div class="center-state">Loading…</div>
+
+ 
+  
+ 
+
+  <div
+    class="app-content"
+    id="content"
+  >
+    <div class="center-state">
+      Loading…
+    </div>
   </div>
+
+
+  <!-- =========================
+       BOTTOM NAVIGATION
+  ========================== -->
 
   <nav class="bottom-nav">
-    <a href="student-dashboard.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Dashboard</a>
-    <a href="student-dashboard.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h4"/></svg>Requests</a>
-    <a href="create-request.html" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>New</a>
-    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6"/></svg>Profile</a>
+
+
+    <!-- DASHBOARD -->
+
+    <a href="student-dashboard.html">
+
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+      >
+        <rect
+          x="3"
+          y="3"
+          width="7"
+          height="7"
+          rx="1.5"
+        />
+
+        <rect
+          x="14"
+          y="3"
+          width="7"
+          height="7"
+          rx="1.5"
+        />
+
+        <rect
+          x="3"
+          y="14"
+          width="7"
+          height="7"
+          rx="1.5"
+        />
+
+        <rect
+          x="14"
+          y="14"
+          width="7"
+          height="7"
+          rx="1.5"
+        />
+      </svg>
+
+      Dashboard
+
+    </a>
+
+
+    <!-- REQUESTS -->
+
+    <a href="student-dashboard.html#requests">
+
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+      >
+        <path d="M4 4h16v16H4z" />
+        <path d="M8 9h8M8 13h8M8 17h4" />
+      </svg>
+
+      Requests
+
+    </a>
+
+
+    <!-- NEW REQUEST -->
+
+    <a
+      href="create-request.html"
+      class="active"
+    >
+
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+      >
+        <circle
+          cx="12"
+          cy="12"
+          r="9"
+        />
+
+        <path d="M12 8v8M8 12h8" />
+      </svg>
+
+      New
+
+    </a>
+
+
+    <!-- PROFILE -->
+
+    <a href="student-dashboard.html#profile">
+
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+      >
+        <circle
+          cx="12"
+          cy="8"
+          r="3.5"
+        />
+
+        <path
+          d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6"
+        />
+      </svg>
+
+      Profile
+
+    </a>
+
   </nav>
+
 </div>
 
-<script type="module" src="js/create-request.js"></script>
+
+<script
+  type="module"
+  src="js/create-request.js"
+></script>
+
 </body>
 </html>

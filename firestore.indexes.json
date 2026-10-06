@@ -1,0 +1,20 @@
+{
+  "indexes": [
+    {"collectionGroup":"noDueRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"studentId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"noDueRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"mentorId","order":"ASCENDING"},{"fieldPath":"status","order":"ASCENDING"}]},
+    {"collectionGroup":"noDueRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"hodId","order":"ASCENDING"},{"fieldPath":"status","order":"ASCENDING"}]},
+    {"collectionGroup":"noDueRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"officeId","order":"ASCENDING"},{"fieldPath":"status","order":"ASCENDING"}]},
+    {"collectionGroup":"noDueRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"officeId","order":"ASCENDING"},{"fieldPath":"usn","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"noDueRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"mentorId","order":"ASCENDING"},{"fieldPath":"studentId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"noDueRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"approverIds","arrayConfig":"CONTAINS"},{"fieldPath":"status","order":"ASCENDING"}]},
+    {"collectionGroup":"noDueRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"approverIds","arrayConfig":"CONTAINS"},{"fieldPath":"studentId","order":"ASCENDING"}]},
+    {"collectionGroup":"noDueRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"approverIds","arrayConfig":"CONTAINS"},{"fieldPath":"studentId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"enrollments","queryScope":"COLLECTION","fields":[{"fieldPath":"offeringId","order":"ASCENDING"},{"fieldPath":"teacherId","order":"ASCENDING"}]},
+    {"collectionGroup":"enrollments","queryScope":"COLLECTION","fields":[{"fieldPath":"offeringId","order":"ASCENDING"},{"fieldPath":"teacherId","order":"ASCENDING"},{"fieldPath":"active","order":"ASCENDING"}]},
+    {"collectionGroup":"enrollments","queryScope":"COLLECTION","fields":[{"fieldPath":"offeringId","order":"ASCENDING"},{"fieldPath":"active","order":"ASCENDING"}]},
+    {"collectionGroup":"enrollments","queryScope":"COLLECTION","fields":[{"fieldPath":"studentId","order":"ASCENDING"},{"fieldPath":"active","order":"ASCENDING"}]},
+    {"collectionGroup":"offerings","queryScope":"COLLECTION","fields":[{"fieldPath":"department","order":"ASCENDING"},{"fieldPath":"scheme","order":"ASCENDING"},{"fieldPath":"semester","order":"ASCENDING"},{"fieldPath":"section","order":"ASCENDING"},{"fieldPath":"active","order":"ASCENDING"}]},
+    {"collectionGroup":"students","queryScope":"COLLECTION","fields":[{"fieldPath":"department","order":"ASCENDING"},{"fieldPath":"scheme","order":"ASCENDING"},{"fieldPath":"semester","order":"ASCENDING"},{"fieldPath":"section","order":"ASCENDING"}]}
+  ],
+  "fieldOverrides": []
+}

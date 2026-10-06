@@ -1,13 +1,22 @@
-# Never commit this — it's a full admin key to your Firebase project
+# Never commit Firebase Admin SDK credentials.
 service-account-key.json
- 
-# Node dependencies (only exists if you ran npm install for the bulk-import script)
 node_modules/
- 
-# OS/editor clutter
 .DS_Store
 Thumbs.db
 .vscode/
- 
-# Firebase CLI local cache
+tests/node_modules/
+tests/.npm-cache/
+*-debug.log
 .firebase/
+functions/.env*
+functions/.secret*
+local-emulator-backup/
+tests/bulk-demo-results.json
+# Generated test/browser artifacts
+tests/*.png
+tests/*.log
+tests/*-results.json
+tests/responsive-baseline.json
+
+# Local audit/output artifacts
+firebase-audit.json

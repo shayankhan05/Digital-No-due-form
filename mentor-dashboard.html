@@ -1,30 +1,180 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Digital No-Due — Mentor</title>
-<link rel="stylesheet" href="css/style.css" />
-<link rel="manifest" href="manifest.json" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Digital No-Due — Mentor</title>
+
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="manifest" href="manifest.json" />
 </head>
+
 <body>
-<div class="app-shell">
-  <div class="top-bar">
-    <div id="mentorHeader" class="brand">Loading…</div>
-    <button id="logoutBtn" class="btn-sm">Log out</button>
+<div class="academic-links"><a href="academic.html">Profile & All Mentees</a> · <a href="approver-dashboard.html">My subject approvals</a></div>
+
+  <div class="app-shell">
+
+    <!-- =====================================================
+         TOP BAR
+    ====================================================== -->
+    <div class="top-bar">
+
+      <div id="mentorHeader" class="brand">
+        Digital No-Due
+      </div>
+
+      <div
+        style="
+          display:flex;
+          align-items:center;
+          gap:10px;
+        "
+      >
+
+        <!-- DARK / LIGHT THEME -->
+        <button
+          id="themeToggle"
+          class="btn-sm"
+          type="button"
+          title="Change theme"
+          aria-label="Change theme"
+        >
+          🌙
+        </button>
+
+        <!-- LOGOUT -->
+        <button
+          id="logoutBtn"
+          class="btn-sm"
+          type="button"
+        >
+          Log out
+        </button>
+
+      </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         MAIN CONTENT
+    ====================================================== -->
+    <div
+      class="app-content"
+      id="content"
+    >
+
+      <div class="center-state">
+        Loading mentor dashboard…
+      </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         BOTTOM NAVIGATION
+    ====================================================== -->
+    <nav class="bottom-nav">
+
+
+      <!-- ================= DASHBOARD ================= -->
+      <a
+        href="mentor-dashboard.html"
+        id="dashboardNav"
+        class="active"
+      >
+
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+        >
+
+          <rect
+            x="3"
+            y="3"
+            width="7"
+            height="7"
+            rx="1.5"
+          />
+
+          <rect
+            x="14"
+            y="3"
+            width="7"
+            height="7"
+            rx="1.5"
+          />
+
+          <rect
+            x="3"
+            y="14"
+            width="7"
+            height="7"
+            rx="1.5"
+          />
+
+          <rect
+            x="14"
+            y="14"
+            width="7"
+            height="7"
+            rx="1.5"
+          />
+
+        </svg>
+
+        Dashboard
+
+      </a>
+
+
+      <!-- ================= PROFILE ================= -->
+      <a
+        href="#profile"
+        id="profileNav"
+      >
+
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+        >
+
+          <circle
+            cx="12"
+            cy="8"
+            r="3.5"
+          />
+
+          <path
+            d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6"
+          />
+
+        </svg>
+
+        Profile
+
+      </a>
+
+
+    </nav>
+
   </div>
 
-  <div class="app-content" id="content">
-    <div class="banner">Only mentees who have completed all Stage 1 approvals (subjects, labs, library, accounts) appear here.</div>
-    <div class="center-state">Loading…</div>
-  </div>
 
-  <nav class="bottom-nav">
-    <a href="mentor-dashboard.html" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Dashboard</a>
-    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6"/></svg>Profile</a>
-  </nav>
-</div>
+  <!-- =====================================================
+       MENTOR JAVASCRIPT
+  ====================================================== -->
+  <script
+    type="module"
+    src="js/mentor.js">
+  </script>
 
-<script type="module" src="js/mentor.js"></script>
 </body>
+
 </html>

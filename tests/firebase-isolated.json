@@ -1,0 +1,51 @@
+{
+  "functions": [
+    {
+      "source": "../functions",
+      "codebase": "institutional",
+      "ignore": ["node_modules", "*.log", ".env*", ".secret*"]
+    }
+  ],
+  "hosting": {
+    "public": "..",
+    "headers": [
+      {
+        "source": "**",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      }
+    ],
+    "ignore": [
+      "firebase.json",
+      "firebase-audit.json",
+      "functions/**",
+      "local-emulator-backup/**",
+      "firestore.rules",
+      "firestore.indexes.json",
+      "README.md",
+      "service-account-key.json",
+      "**/*service-account*.json",
+      "**/*.pem",
+      "**/*.csv",
+      "docs/**",
+      "tests/**",
+      "tools/**",
+      "**/*.log",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  },
+  "firestore": {
+    "rules": "C:/Users/Hp/Desktop/College Projects/Digital-No-Due-Form/firestore.rules",
+    "indexes": "C:/Users/Hp/Desktop/College Projects/Digital-No-Due-Form/firestore.indexes.json"
+  },
+  "emulators": {
+    "auth": { "host": "127.0.0.1", "port": 9199 },
+    "firestore": { "host": "127.0.0.1", "port": 8180 },
+    "hosting": { "host": "127.0.0.1", "port": 5050 },
+    "functions": { "host": "127.0.0.1", "port": 5001 },
+    "ui": { "enabled": true, "host": "127.0.0.1", "port": 4500 },
+    "hub": { "host": "127.0.0.1", "port": 4410 },
+    "logging": { "host": "127.0.0.1", "port": 4501 },
+    "singleProjectMode": true
+  }
+}

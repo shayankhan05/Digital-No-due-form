@@ -1,208 +1,106 @@
-import { db } from "./firebase-config.js";
-import {
-  doc, collection, getDoc, getDocs, updateDoc, writeBatch, serverTimestamp,
-} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-
-// ---------------------------------------------------------------
-// Request status moves through exactly these states, in order.
-// A rejection anywhere jumps straight to "rejected".
-// ---------------------------------------------------------------
-export const STATUS = {
-  PENDING_STAGE1: "pending_stage1", // subject faculty + library + labs + accounts (parallel)
-  PENDING_MENTOR: "pending_mentor", // soft-skill attestation
-  PENDING_HOD: "pending_hod",       // coordinator / HOD sign-off
-  CLEARED: "cleared",               // ready for hall ticket
-  REJECTED: "rejected",
-  ISSUED: "issued",                 // office has handed over the hall ticket
-};
-
+import { db, auth } from "./firebase-config.js";
+import { doc, collection, getDoc, getDocs, writeBatch, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { stage1Change, resumeChange, STATUS, statusLabel } from "./workflow-model.js";
+export { STATUS, statusLabel };
 export const STAGE1_TYPES = ["subject_faculty", "library", "physics_lab", "chemistry_lab", "accounts"];
-
-// ---------------------------------------------------------------
-// Hardcoded per semester/section for now (this is the "workflow config"
-// step you deferred to v2 — an admin screen would edit this instead).
-// Add more entries as your college needs them.
-// ---------------------------------------------------------------
-const REQUIRED_APPROVERS_BY_KEY = {
-  "6-B": [
-    { type: "library", label: "Library" },
-    { type: "physics_lab", label: "Physics lab" },
-    { type: "chemistry_lab", label: "Chemistry lab" },
-    { type: "accounts", label: "Accounts" },
-    { type: "subject_faculty", subjectCode: "CS61", label: "Computer Networks" },
-    { type: "subject_faculty", subjectCode: "CS62", label: "DBMS" },
-    { type: "subject_faculty", subjectCode: "CS63", label: "Software Engineering" },
-    { type: "subject_faculty", subjectCode: "CS64", label: "System Software" },
-    { type: "subject_faculty", subjectCode: "CS65", label: "Web Technology" },
-    { type: "subject_faculty", subjectCode: "CS66", label: "Data Mining" },
-    { type: "subject_faculty", subjectCode: "CS67", label: "Cloud Computing" },
-    { type: "subject_faculty", subjectCode: "CS68", label: "Open Elective" },
-  ],
-};
-
-export function getRequiredApprovers(semester, section) {
-  return REQUIRED_APPROVERS_BY_KEY[`${semester}-${section}`] || REQUIRED_APPROVERS_BY_KEY["6-B"];
+export async function getRequiredApprovers(uid) {
+  const [snap, config] = await Promise.all([getDoc(doc(db, "students", uid, "clearance", "plan")), getDoc(doc(db,"settings","workflow"))]);
+  if (!snap.exists() || snap.data().valid !== true) throw new Error("Ask the administrator to prepare your academic clearance plan.");
+  const p = snap.data(), c = config.data();
+  if (!c || p.hodId !== c.hodId || p.officeId !== c.officeId || ["library","physics_lab","chemistry_lab","accounts"].some(type => p.items[type]?.approverId !== c[type])) throw new Error("Workflow assignments changed. Ask the administrator to refresh your clearance plan.");
+  return Object.entries(snap.data().items).map(([id, item]) => ({ id, ...item, type: item.approverType }));
 }
-
-/**
- * Creates a new No-Due request plus one approval document per Stage 1 item.
- * Mentor and HOD decisions live directly on the request document (see approveMentor/approveHod)
- * since there's only ever one of each, unlike Stage 1's many parallel items.
- */
-export async function submitRequest(student) {
-  const requestRef = doc(collection(db, "noDueRequests"));
-  const batch = writeBatch(db);
-
-  batch.set(requestRef, {
-    studentId: student.uid,
-    studentName: student.name,
-    usn: student.usn,
-    semester: student.semester,
-    section: student.section,
-    mentorId: student.mentorId || null,
-    status: STATUS.PENDING_STAGE1,
-    mentorApproval: { status: "pending", remarks: "" },
-    hodApproval: { status: "pending", remarks: "" },
-    createdAt: serverTimestamp(),
-  });
-
-  const required = getRequiredApprovers(student.semester, student.section);
-  required.forEach((item) => {
-    const approvalRef = doc(collection(requestRef, "approvals"));
-    batch.set(approvalRef, {
-      approverType: item.type,
-      subjectCode: item.subjectCode || null,
-      label: item.label,
-      status: "pending",
-      remarks: "",
-      actedBy: null,
-      actedAt: null,
-      // Denormalized so approver screens can list pending items with one query,
-      // instead of a follow-up read to the parent request for every row.
-      studentId: student.uid,
-      studentName: student.name,
-      usn: student.usn,
-      section: student.section,
-      requestId: requestRef.id,
-    });
-  });
-
-  await batch.commit();
-  return requestRef.id;
+export async function submitRequest() {
+  const uid = auth.currentUser.uid;
+  const [studentSnap, planSnap] = await Promise.all([getDoc(doc(db, "students", uid)), getDoc(doc(db, "students", uid, "clearance", "plan"))]);
+  if (!studentSnap.exists() || !planSnap.exists()) throw new Error("Ask the administrator to link your student profile and prepare your clearance plan.");
+  const s = studentSnap.data(), p = planSnap.data();
+  const ref = doc(collection(db, "noDueRequests")), batch = writeBatch(db);
+  batch.set(ref, { schemaVersion: 2, studentId: uid, studentName: s.name, usn: s.usn, semester: s.semester, section: s.section, mentorId: p.mentorId, hodId: p.hodId, officeId: p.officeId, approverIds: p.approverIds, approvalItems: p.items, approvalStates: p.initialStates, resubmissionStates: p.initialStates, remaining: Object.keys(p.items).length, status: STATUS.PENDING_STAGE1, mentorApproval: { status: "pending", remarks: "" }, hodApproval: { status: "pending", remarks: "" }, lastApprovalId: "", version: 0, lastEvent: null, createdAt: serverTimestamp() });
+  for (const [id, item] of Object.entries(p.items)) batch.set(doc(ref, "approvals", id), { ...item, status: "pending", remarks: "", actedBy: null, actedAt: null, studentId: uid, studentName: s.name, usn: s.usn, section: s.section, requestId: ref.id });
+  await batch.commit(); return ref.id;
 }
-
-/** Approve or reject a single Stage 1 item (a subject/library/lab/accounts row). */
-export async function actOnStage1Item(requestId, approvalId, decision, remarks, actorName) {
-  const approvalRef = doc(db, "noDueRequests", requestId, "approvals", approvalId);
-  await updateDoc(approvalRef, {
-    status: decision, // "approved" | "rejected"
-    remarks: remarks || "",
-    actedBy: actorName || null,
-    actedAt: serverTimestamp(),
-  });
-  await checkAndAdvance(requestId);
+function validateDecision(decision, remarks) {
+  if (!["approved", "rejected"].includes(decision)) throw new Error("Invalid decision.");
+  if (decision === "rejected" && !remarks?.trim()) throw new Error("A rejection reason is required.");
+  if ((remarks || "").length > 2000) throw new Error("Keep the reason under 2000 characters.");
 }
-
-/**
- * Re-evaluates a request's status after a Stage 1 item changes.
- * Called after every Stage 1 approve/reject — there's no server function doing this for us,
- * so the client that just acted is responsible for triggering the check.
- */
-export async function checkAndAdvance(requestId) {
-  const requestRef = doc(db, "noDueRequests", requestId);
-  const approvalsSnap = await getDocs(collection(requestRef, "approvals"));
-  const items = approvalsSnap.docs.map((d) => d.data());
-
-  if (items.some((a) => a.status === "rejected")) {
-    await updateDoc(requestRef, { status: STATUS.REJECTED });
-    return;
+async function changeRequest(requestId, change) {
+  const ref = doc(db, "noDueRequests", requestId);
+  const actorSnap = await getDoc(doc(db, "users", auth.currentUser.uid));
+  const actor = { ...actorSnap.data(), uid: auth.currentUser.uid };
+  // Concurrent event versions can be denied by rules before the SDK reports an
+  // optimistic conflict. Retry only when a fresh authorized read proves progress.
+  for (let attempt = 0; attempt < 5; attempt++) {
+  let observedVersion = null;
+  try {
+  await runTransaction(db, async tx => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error("Request not found.");
+    const r = snap.data();
+    observedVersion = r.version;
+    if (r.schemaVersion !== 2) throw new Error("Ask the administrator to upgrade this legacy request before processing.");
+    const { patch, approvalId, approvalIds, decision, reason = "", subjectCode = null } = change(r, actor);
+    const version = r.version + 1;
+    const event = { requestId, studentId: r.studentId, actorId: actor.uid, actorName: actor.name || "", actorType: actor.role, subjectCode, reason, status: patch.status, version, createdAt: serverTimestamp() };
+    tx.update(ref, { ...patch, version, lastEvent: event, updatedAt: serverTimestamp() });
+    tx.set(doc(db, "users", r.studentId, "notifications", `${requestId}_${version}`), event);
+    for (const key of approvalIds || (approvalId ? [approvalId] : [])) tx.set(doc(ref, "approvals", key), { ...r.approvalItems[key], studentId: r.studentId, studentName: r.studentName, usn: r.usn, section: r.section, requestId, status: decision, remarks: reason, actedBy: actor.name || "", actorId: actor.uid, actedAt: serverTimestamp() });
+  });
+  return;
+  } catch (error) {
+    if (error.code !== "permission-denied" || observedVersion === null || attempt === 4) throw error;
+    const fresh = await getDoc(ref);
+    if (!fresh.exists() || fresh.data().version <= observedVersion) throw error;
   }
-  if (items.every((a) => a.status === "approved")) {
-    await updateDoc(requestRef, { status: STATUS.PENDING_MENTOR });
   }
 }
-
-/** Mentor's soft-skill decision. Only meaningful once status is already PENDING_MENTOR. */
-export async function actAsMentor(requestId, decision, remarks) {
-  const requestRef = doc(db, "noDueRequests", requestId);
-  await updateDoc(requestRef, {
-    mentorApproval: { status: decision, remarks: remarks || "" },
-    status: decision === "approved" ? STATUS.PENDING_HOD : STATUS.REJECTED,
+export async function actOnStage1Item(requestId, approvalId, decision, remarks) {
+  validateDecision(decision, remarks);
+  return changeRequest(requestId, (r, actor) => {
+    const item = r.approvalItems[approvalId];
+    if (!item || item.approverId !== actor.uid) throw new Error("This approval is not assigned to you.");
+    return { patch: stage1Change(r, approvalId, decision), approvalId, decision, reason: (remarks || "").trim(), subjectCode: item.subjectCode || null };
   });
 }
-
-/** HOD / Coordinator's final decision. Only meaningful once status is already PENDING_HOD. */
-export async function actAsHod(requestId, decision, remarks) {
-  const requestRef = doc(db, "noDueRequests", requestId);
-  await updateDoc(requestRef, {
-    hodApproval: { status: decision, remarks: remarks || "" },
-    status: decision === "approved" ? STATUS.CLEARED : STATUS.REJECTED,
+export async function checkAndAdvance() { throw new Error("Use the approval action; advancement is atomic."); }
+function stageDecision(id, decision, remarks, field, stage, next, role, owner) {
+  validateDecision(decision, remarks);
+  return changeRequest(id, (r, actor) => {
+    if (r.status !== stage || actor.role !== role || r[owner] !== actor.uid) throw new Error("This request is not at your assigned approval stage.");
+    return { patch: { [field]: { status: decision, remarks: (remarks || "").trim(), actorId: actor.uid, actedAt: serverTimestamp() }, status: decision === "approved" ? next : STATUS.REJECTED }, reason: (remarks || "").trim() };
   });
 }
-
-/** Office issues the hall ticket. Only enabled in the UI once status is CLEARED. */
-export async function issueHallTicket(requestId, issuedBy) {
-  const requestRef = doc(db, "noDueRequests", requestId);
-  await updateDoc(requestRef, {
-    status: STATUS.ISSUED,
-    issuedBy: issuedBy || null,
-    issuedAt: serverTimestamp(),
-  });
-}
-
-/**
- * Student resubmits after a rejection. Resets only the item(s) that were rejected —
- * everything already approved stays approved.
- */
-export async function resubmit(requestId) {
-  const requestRef = doc(db, "noDueRequests", requestId);
-  const approvalsSnap = await getDocs(collection(requestRef, "approvals"));
-  const rejectedStage1 = approvalsSnap.docs.filter((d) => d.data().status === "rejected");
-
-  if (rejectedStage1.length > 0) {
-    const batch = writeBatch(db);
-    rejectedStage1.forEach((d) => {
-      batch.update(d.ref, { status: "pending", remarks: "" });
-    });
-    batch.update(requestRef, { status: STATUS.PENDING_STAGE1 });
-    await batch.commit();
-    return;
-  }
-
-  // Otherwise the rejection came from the mentor or HOD stage.
-  const requestDoc = await getDoc(requestRef);
-  const data = requestDoc.data();
-
-  if (data.mentorApproval?.status === "rejected") {
-    await updateDoc(requestRef, {
-      mentorApproval: { status: "pending", remarks: "" },
-      status: STATUS.PENDING_MENTOR,
-    });
-  } else if (data.hodApproval?.status === "rejected") {
-    await updateDoc(requestRef, {
-      hodApproval: { status: "pending", remarks: "" },
-      status: STATUS.PENDING_HOD,
-    });
-  }
-}
-
-export function statusLabel(status) {
-  const labels = {
-    pending_stage1: "In progress",
-    pending_mentor: "With mentor",
-    pending_hod: "With coordinator",
-    cleared: "Cleared",
-    rejected: "Rejected",
-    issued: "Hall ticket issued",
-  };
-  return labels[status] || status;
-}
-/**
-  One thing worth remembering for the rest of your testing: whenever you hand-edit an approval's status directly in Firestore instead of clicking the real button, this same thing will happen again — the item looks done, but nothing tells the request
-  to move forward. The safest habit from here: always leave the very last item in a stage to approve through the real app button, not through Firestore directly.
-  import("./js/workflow.js").then(({ checkAndAdvance }) => {
-  checkAndAdvance("8sWKxneDtEddtPZNFOt0").then(() => console.log("Checked — reload the dashboard now."));
+export const actAsMentor = (id, d, r) => stageDecision(id, d, r, "mentorApproval", STATUS.PENDING_MENTOR, STATUS.PENDING_HOD, "mentor", "mentorId");
+export const actAsHod = (id, d, r) => stageDecision(id, d, r, "hodApproval", STATUS.PENDING_HOD, STATUS.CLEARED, "hod", "hodId");
+export const issueHallTicket = id => changeRequest(id, (r, actor) => {
+  if (r.status !== STATUS.CLEARED || actor.role !== "office" || r.officeId !== actor.uid) throw new Error("Only the assigned office can issue a cleared request.");
+  return { patch: { status: STATUS.ISSUED, issuedBy: actor.name, issuedById: actor.uid, issuedAt: serverTimestamp() } };
 });
-import("./js/workflow.js").then(({ checkAndAdvance }) => {
-  checkAndAdvance("qMXmX56maH44OemNCETb").then(() => console.log("Checked — reload now."));
-}); **/
+export const resubmit = id => changeRequest(id, (r, actor) => {
+  if (r.studentId !== actor.uid) throw new Error("This request does not belong to you.");
+  const patch = resumeChange(r);
+  const approvalIds = patch.approvalStates ? Object.keys(r.approvalStates).filter(key => r.approvalStates[key] === "rejected") : [];
+  return { patch, approvalIds, decision: "pending" };
+});
+// Explicit admin-only compatibility action; never invoked automatically.
+export async function upgradeLegacyRequest(id, plan) {
+  const ref = doc(db, "noDueRequests", id);
+  const [snap, approvals] = await Promise.all([getDoc(ref), getDocs(collection(ref, "approvals"))]);
+  const r = snap.data();
+  if (!r || r.schemaVersion === 2) throw new Error("Choose an existing legacy request.");
+  const items = {}, states = {}, legacyRejections = [];
+  for (const a of approvals.docs) {
+    const old = a.data();
+    const match = Object.values(plan.items).find(p => p.approverType === old.approverType && (p.subjectCode || null) === (old.subjectCode || null));
+    if (!match) throw new Error(`No mapping found for ${old.label}. Correct mappings before upgrading.`);
+    items[a.id] = match; states[a.id] = old.status;
+    if (old.status === "rejected") legacyRejections.push({approvalId:a.id,actorName:old.actedBy || old.label || old.approverType,actorType:old.approverType,subjectCode:old.subjectCode || null,reason:old.remarks || "Reason was not recorded in this legacy request.",createdAt:old.actedAt || null});
+  }
+  if (!approvals.size) throw new Error("Legacy request has no approval records.");
+  const batch = writeBatch(db);
+  batch.update(ref, { schemaVersion: 2, approvalItems: items, approvalStates: states, resubmissionStates: Object.fromEntries(Object.entries(states).map(([key,value]) => [key,value === "rejected" ? "pending" : value])), remaining: Object.values(states).filter(s => s !== "approved").length, approverIds: [...new Set(Object.values(items).map(i => i.approverId))], mentorId: plan.mentorId, hodId: plan.hodId, officeId: plan.officeId, lastApprovalId: Object.keys(states).find(k => states[k] === "rejected") || "", version: 0, lastEvent: null });
+  for (const a of approvals.docs) batch.update(a.ref, items[a.id]);
+  batch.update(ref,{legacyRejections});
+  await batch.commit();
+}

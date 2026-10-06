@@ -1,0 +1,8 @@
+department,scheme,semester,section,subjectCode,subjectName,teacherEmail,credits,components,active
+ISE,2022,5,C,BCS501,Software Engineering & Project Management,,,,true
+ISE,2022,5,C,BCS502,Computer Networks,,,,true
+ISE,2022,5,C,BCS503,Theory of Computation,,,,true
+ISE,2022,5,C,BCS515B,Unix System Programming,,,,true
+ISE,2022,5,C,,Research Methodology & IPR,,,,true
+ISE,2022,5,C,,Mini Project,,,,true
+ISE,2022,5,C,,Environmental Studies / EVS,,,,true

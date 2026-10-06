@@ -1,0 +1,20 @@
+{
+  "name": "digital-no-due-emulator-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --loader ./firebase-loader.mjs --test workflow.test.mjs security.test.mjs",
+    "emulators": "firebase emulators:exec --project demo-digital-no-due --only firestore,auth --config ../firebase.json \"npm test\"",
+    "preview": "node start-preview.mjs",
+    "seed": "node --loader ./firebase-loader.mjs seed-demo.mjs",
+    "verify:demo": "node --loader ./firebase-loader.mjs verify-demo.mjs",
+    "test:all": "node run-audit-tests.mjs",
+    "audit": "firebase emulators:exec --project demo-digital-no-due-audit --only firestore,auth,functions --config ../firebase-audit.json \"npm run test:all\"",
+    "seed:bulk": "node seed-bulk.mjs"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "firebase": "^12.0.0",
+    "firebase-tools": "^15.0.0"
+  }
+}
