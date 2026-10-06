@@ -1,22 +1,25 @@
-import { db, auth } from "./firebase-config.js";
+import { db, auth, functions } from "./firebase-config.js";
+import {httpsCallable} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-functions.js";
 import { doc, collection, getDoc, getDocs, writeBatch, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { stage1Change, resumeChange, STATUS, statusLabel } from "./workflow-model.js";
 export { STATUS, statusLabel };
-export const STAGE1_TYPES = ["subject_faculty", "library", "physics_lab", "chemistry_lab", "accounts"];
+export const STAGE1_TYPES = ["subject_faculty", "library", "accounts"];
 export async function getRequiredApprovers(uid) {
+  if(functions) await httpsCallable(functions,"studentWorkflow")({studentUid:uid});
   const [snap, config] = await Promise.all([getDoc(doc(db, "students", uid, "clearance", "plan")), getDoc(doc(db,"settings","workflow"))]);
   if (!snap.exists() || snap.data().valid !== true) throw new Error("Ask the administrator to prepare your academic clearance plan.");
   const p = snap.data(), c = config.data();
-  if (!c || p.hodId !== c.hodId || p.officeId !== c.officeId || ["library","physics_lab","chemistry_lab","accounts"].some(type => p.items[type]?.approverId !== c[type])) throw new Error("Workflow assignments changed. Ask the administrator to refresh your clearance plan.");
+  if (!c || p.hodId !== c.hodId || p.officeId !== c.officeId || ["library","accounts"].some(type => p.items[type]?.approverId !== c[type])) throw new Error("Workflow assignments changed. Ask the administrator to refresh your clearance plan.");
   return Object.entries(snap.data().items).map(([id, item]) => ({ id, ...item, type: item.approverType }));
 }
 export async function submitRequest() {
   const uid = auth.currentUser.uid;
+  if(functions) await getRequiredApprovers(uid);
   const [studentSnap, planSnap] = await Promise.all([getDoc(doc(db, "students", uid)), getDoc(doc(db, "students", uid, "clearance", "plan"))]);
   if (!studentSnap.exists() || !planSnap.exists()) throw new Error("Ask the administrator to link your student profile and prepare your clearance plan.");
   const s = studentSnap.data(), p = planSnap.data();
   const ref = doc(collection(db, "noDueRequests")), batch = writeBatch(db);
-  batch.set(ref, { schemaVersion: 2, studentId: uid, studentName: s.name, usn: s.usn, semester: s.semester, section: s.section, mentorId: p.mentorId, hodId: p.hodId, officeId: p.officeId, approverIds: p.approverIds, approvalItems: p.items, approvalStates: p.initialStates, resubmissionStates: p.initialStates, remaining: Object.keys(p.items).length, status: STATUS.PENDING_STAGE1, mentorApproval: { status: "pending", remarks: "" }, hodApproval: { status: "pending", remarks: "" }, lastApprovalId: "", version: 0, lastEvent: null, createdAt: serverTimestamp() });
+  batch.set(ref, { schemaVersion: 2, ...(p.workflowVersion===3?{workflowVersion:3}:{}), studentId: uid, studentName: s.name, usn: s.usn, semester: s.semester, section: s.section, mentorId: p.mentorId, hodId: p.hodId, officeId: p.officeId, approverIds: p.approverIds, approvalItems: p.items, approvalStates: p.initialStates, resubmissionStates: p.initialStates, remaining: Object.keys(p.items).length, status: STATUS.PENDING_STAGE1, mentorApproval: { status: "pending", remarks: "" }, hodApproval: { status: "pending", remarks: "" }, lastApprovalId: "", version: 0, lastEvent: null, createdAt: serverTimestamp() });
   for (const [id, item] of Object.entries(p.items)) batch.set(doc(ref, "approvals", id), { ...item, status: "pending", remarks: "", actedBy: null, actedAt: null, studentId: uid, studentName: s.name, usn: s.usn, section: s.section, requestId: ref.id });
   await batch.commit(); return ref.id;
 }
@@ -45,7 +48,7 @@ async function changeRequest(requestId, change) {
     const event = { requestId, studentId: r.studentId, actorId: actor.uid, actorName: actor.name || "", actorType: actor.role, subjectCode, reason, status: patch.status, version, createdAt: serverTimestamp() };
     tx.update(ref, { ...patch, version, lastEvent: event, updatedAt: serverTimestamp() });
     tx.set(doc(db, "users", r.studentId, "notifications", `${requestId}_${version}`), event);
-    for (const key of approvalIds || (approvalId ? [approvalId] : [])) tx.set(doc(ref, "approvals", key), { ...r.approvalItems[key], studentId: r.studentId, studentName: r.studentName, usn: r.usn, section: r.section, requestId, status: decision, remarks: reason, actedBy: actor.name || "", actorId: actor.uid, actedAt: serverTimestamp() });
+    for (const key of approvalIds || (approvalId ? [approvalId] : [])) tx.set(doc(ref, "approvals", key), { ...r.approvalItems[key], studentId: r.studentId, studentName: r.studentName, usn: r.usn, section: r.section, requestId, status: decision, remarks: reason, actedBy: actor.name || "", actorId: actor.uid, actedAt: serverTimestamp() }, {merge:true});
   });
   return;
   } catch (error) {
@@ -59,7 +62,7 @@ export async function actOnStage1Item(requestId, approvalId, decision, remarks) 
   validateDecision(decision, remarks);
   return changeRequest(requestId, (r, actor) => {
     const item = r.approvalItems[approvalId];
-    if (!item || item.approverId !== actor.uid) throw new Error("This approval is not assigned to you.");
+    if (!item || item.approverId !== actor.uid || !STAGE1_TYPES.includes(item.approverType)) throw new Error("This approval is not assigned to you.");
     return { patch: stage1Change(r, approvalId, decision), approvalId, decision, reason: (remarks || "").trim(), subjectCode: item.subjectCode || null };
   });
 }
@@ -89,6 +92,7 @@ export async function upgradeLegacyRequest(id, plan) {
   const [snap, approvals] = await Promise.all([getDoc(ref), getDocs(collection(ref, "approvals"))]);
   const r = snap.data();
   if (!r || r.schemaVersion === 2) throw new Error("Choose an existing legacy request.");
+  if(functions) {await httpsCallable(functions,"studentWorkflow")({studentUid:r.studentId});return;}
   const items = {}, states = {}, legacyRejections = [];
   for (const a of approvals.docs) {
     const old = a.data();

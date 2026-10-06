@@ -75,7 +75,8 @@ test('automatic class roster, isolated marks, mentor directory, own academic dat
 test('late offering import automatically maps already imported students with paginated class writes',async()=>{
   await login(`${prefix}-admin@demo.test`);
   const row={...syntheticOffering('C',`${prefix}-subject_faculty@demo.test`),subjectCode:'CS502',subjectName:'Java Programming'};
-  await api('importOffering',{row});const mapped=await api('mapClass',{department:'ISE',scheme:'2022',semester:5,section:'C'});assert.equal(mapped.results.length,16);assert.ok(mapped.results.every(r=>r.subjectsMapped===2));
+  delete row.active; // Exact required CSV schema: no active column.
+  const imported=await api('importOffering',{row});assert.equal(imported.active,true);assert.equal(imported.studentsMatched,16);assert.equal(imported.studentsMapped,16);assert.deepEqual(imported.mappingErrors,[]);
   const uid=created[2].uid;await login(created[2].email);assert.equal((await academicDetails(uid)).subjects.length,2);
 });
 test('CSV reimports repair legacy offering enrollment for A/B/C without duplicating or replacing marks',async()=>{
@@ -120,7 +121,7 @@ test('CSV reimports repair legacy offering enrollment for A/B/C without duplicat
     assert.equal((await server.db.doc(`enrollments/${customId}`).get()).data().customNote,'Keep this enrollment');
     assert.deepEqual((await server.db.doc(`marks/${customId}`).get()).data(),savedMarks);
     const profile=(await server.db.doc(`students/${student.uid}`).get()).data();assert.equal(profile.offeringIds.length,3);
-    const plan=(await server.db.doc(`students/${student.uid}/clearance/plan`).get()).data();assert.equal(plan.valid,true);assert.equal(Object.keys(plan.items).length,7);
+    const plan=(await server.db.doc(`students/${student.uid}/clearance/plan`).get()).data();assert.equal(plan.valid,true);assert.equal(Object.keys(plan.items).length,5);assert.equal(plan.items.physics_lab,undefined);assert.equal(plan.items.chemistry_lab,undefined);
     await login(student.email);const details=await academicDetails(student.uid);assert.equal(details.subjects.length,3);assert.ok(details.subjects.every(s=>s.offering.section===section));
     const dashboardSubjects=(await getRequiredApprovers(student.uid)).filter(item=>item.approverType==='subject_faculty');assert.equal(dashboardSubjects.length,3);
     assert.equal(details.subjects.find(s=>s.enrollment.id===customId).marks.scores.ia1,24);
@@ -147,6 +148,44 @@ test('fully scoped offerings supersede legacy fallbacks without deleting enrollm
   assert.equal((await server.db.doc(`enrollments/${legacyEnrollment}`).get()).data().active,false);
   assert.deepEqual((await server.db.doc(`marks/${legacyEnrollment}`).get()).data(),oldMarks);
   await login(student.email);assert.equal((await academicDetails(student.uid)).subjects.length,3);assert.equal((await getRequiredApprovers(student.uid)).filter(i=>i.type==='subject_faculty').length,3);
+});
+
+test('offering import maps every existing normalized A/B/C student across pages, additively and idempotently',async()=>{
+  await login(`${prefix}-admin@demo.test`);
+  const semester=11,legacyId=`${prefix}-preserved-legacy-11-B`;
+  await server.db.doc(`offerings/${legacyId}`).set({subjectId:legacyId,subjectCode:'KEEP',subjectName:'Preserved legacy subject',semester,section:'B',teacherId:ids.subject_faculty,components:[{id:'ia1',label:'Internal',max:30}]});
+  const students=[];
+  for(let i=0;i<31;i++) {
+    const section=i<25?'B':i<27?'A':i<29?'C':'B';
+    const row={...rows[0],semester,section,usn:`AUTO${Date.now()}${i}`,collegeEmail:`${prefix}-auto-offering-${i}@demo.test`,...(i===29?{department:'Computer Science'}:i===30?{scheme:'2021'}:{})};
+    students.push({...await api('provision',{row,requestId:`${prefix}-auto-offering-${i}`}),row});
+  }
+  // Historical variants still belong to the same B cohort.
+  await server.db.doc(`students/${students[0].uid}`).set({semester:'11',scheme:2022,section:' b ',department:'Information Science & Engineering'},{merge:true});
+  const oldEnrollment=(await server.db.collection('enrollments').where('studentId','==',students[0].uid).get()).docs[0];
+  await oldEnrollment.ref.set({customNote:'Preserve existing enrollment'},{merge:true});
+  const marks={studentId:students[0].uid,offeringId:legacyId,teacherId:ids.subject_faculty,mentorId:ids.mentor,scores:{ia1:23}};
+  await server.db.doc(`marks/${oldEnrollment.id}`).set(marks);
+  const baselineEnrollments=(await server.db.collection('enrollments').get()).docs.map(d=>d.id),baselineLegacy=(await server.db.doc(`offerings/${legacyId}`).get()).data();
+  const idsBySection={};
+  for(const [section,count] of [['A',2],['B',25],['C',2]]) {
+    const row={...syntheticOffering(section,`${prefix}-subject_faculty@demo.test`),semester,subjectCode:`AUTO-${section}`,subjectName:`Automatic ${section}`};delete row.active;
+    const preview=await api('previewOfferings',{rows:[row]});assert.equal(preview.valid,1);assert.equal(preview.rows[0].row.active,true);
+    const imported=await api('importOffering',{row});assert.equal(imported.studentsMatched,count);assert.equal(imported.studentsMapped,count);assert.deepEqual(imported.mappingErrors,[]);idsBySection[section]=imported.id;
+    const original=(await server.db.doc(`offerings/${imported.id}`).get()).data();
+    const repeat=await api('importOffering',{row});assert.equal(repeat.studentsMapped,count);assert.equal(repeat.id,imported.id);assert.deepEqual((await server.db.doc(`offerings/${imported.id}`).get()).data(),original);
+    const roster=await server.db.collection('enrollments').where('offeringId','==',imported.id).get();assert.equal(roster.size,count);assert.ok(roster.docs.every(d=>students.find(s=>s.uid===d.data().studentId)?.row.section===section));
+  }
+  const afterIds=new Set((await server.db.collection('enrollments').get()).docs.map(d=>d.id));assert.ok(baselineEnrollments.every(id=>afterIds.has(id)));
+  assert.equal((await oldEnrollment.ref.get()).data().active,true);assert.equal((await oldEnrollment.ref.get()).data().customNote,'Preserve existing enrollment');assert.deepEqual((await server.db.doc(`marks/${oldEnrollment.id}`).get()).data(),marks);
+  assert.deepEqual((await server.db.doc(`offerings/${legacyId}`).get()).data(),baselineLegacy);
+  for(const student of students.slice(29))assert.equal((await server.db.collection('enrollments').where('studentId','==',student.uid).where('offeringId','==',idsBySection.B).get()).size,0);
+  const inactive={...syntheticOffering('C',`${prefix}-subject_faculty@demo.test`),semester,subjectCode:'DISABLED',subjectName:'Explicitly disabled',active:false};
+  const disabled=await api('importOffering',{row:inactive});assert.equal(disabled.active,false);assert.equal(disabled.studentsMatched,0);assert.equal((await server.db.collection('enrollments').where('offeringId','==',disabled.id).get()).size,0);
+  const newRow={...rows[0],semester,section:'B',usn:`LATE${Date.now()}`,collegeEmail:`${prefix}-late-auto-student@demo.test`};
+  const late=await api('provision',{row:newRow,requestId:`${prefix}-late-auto-student`});assert.equal((await server.db.collection('enrollments').where('studentId','==',late.uid).where('offeringId','==',idsBySection.B).get()).size,1);
+  await login(`${prefix}-subject_faculty@demo.test`);const roster=await page('enrollments',[['offeringId','==',idsBySection.B],['teacherId','==',ids.subject_faculty],['active','==',true]],null,100);assert.equal(roster.rows.length,26);
+  await login(students[1].email);assert.ok((await academicDetails(students[1].uid)).subjects.some(s=>s.offering.id===idsBySection.B));await login(`${prefix}-admin@demo.test`);
 });
 
 test('teacher CSV validates required fields, staff roles, duplicates and identity conflicts',async()=>{
@@ -233,6 +272,46 @@ test('Firebase forgot password and reauthenticated change password work in the e
   await signOut(auth);await login(target.email,'ChangedDemoPassword789!');
   // Restore only the synthetic test account so the professor demo credentials remain simple.
   await server.auth.updateUser(target.uid,{password:'DemoPassword123!'});
+});
+test('explicit demo repair restores an Auth-only student without changing UID or password',async()=>{
+  await login(`${prefix}-admin@demo.test`);
+  const row={...rows[2],name:'Verified orphan student',collegeEmail:`${prefix}-orphan@demo.test`,usn:`REPAIR${Date.now()}`},password='ExistingPassword789!';
+  const account=await server.auth.createUser({email:row.collegeEmail,displayName:row.name,password});
+  const before=(await server.auth.getUser(account.uid)).toJSON();
+  const ordinary=await api('previewAccounts',{rows:[row]});assert.equal(ordinary.errors,1,'Regular imports must not silently adopt an unknown Auth identity.');
+  const result=await api('repairDemoProfile',{expectedUid:account.uid,row});assert.equal(result.uid,account.uid);assert.equal(result.authChanged,false);assert.ok(result.subjectsMapped>0);
+  assert.equal((await server.db.doc(`users/${account.uid}`).get()).data().role,'student');assert.equal((await server.db.doc(`students/${account.uid}`).get()).data().usn,row.usn);
+  assert.deepEqual((await server.auth.getUser(account.uid)).toJSON(),before);
+  assert.equal(await login(row.collegeEmail,password),account.uid);await login(`${prefix}-admin@demo.test`);
+});
+test('repair is idempotent and retains marks, enrollment records and No-Due projections',async()=>{
+  await login(`${prefix}-admin@demo.test`);
+  const row={...rows[2],name:'Incomplete profile student',collegeEmail:`${prefix}-incomplete@demo.test`,usn:`PARTIAL${Date.now()}`};
+  const imported=await api('provision',{row,requestId:`${prefix}-incomplete`}),uid=imported.uid;
+  await login(row.collegeEmail);const requestId=await submitRequest();await login(`${prefix}-admin@demo.test`);
+  const {FieldValue}=require('firebase-admin/firestore');await server.db.doc(`users/${uid}`).update({role:FieldValue.delete()});await server.db.doc(`students/${uid}`).update({department:FieldValue.delete()});
+  const enrollment=await server.db.collection('enrollments').where('studentId','==',uid).get(),markRef=server.db.doc(`marks/${enrollment.docs[0].id}`);
+  await markRef.set({studentId:uid,offeringId:enrollment.docs[0].data().offeringId,teacherId:enrollment.docs[0].data().teacherId,scores:{ia1:17},testMarker:'Preserve this exact mark'});
+  const mark=(await markRef.get()).data(),request=(await server.db.doc(`noDueRequests/${requestId}`).get()).data(),projections=(await server.db.collection(`noDueRequests/${requestId}/approvals`).get()).docs.map(d=>[d.id,d.data()]);
+  const repaired=await api('repairDemoProfile',{expectedUid:uid,row});assert.ok(repaired.repairedFields.includes('users.role'));assert.ok(repaired.repairedFields.includes('students.department'));
+  const afterUser=(await server.db.doc(`users/${uid}`).get()).data(),afterStudent=(await server.db.doc(`students/${uid}`).get()).data();
+  const repeated=await api('repairDemoProfile',{expectedUid:uid,row});assert.deepEqual(repeated.repairedFields,[]);assert.equal(repeated.subjectsMapped,0);
+  assert.deepEqual((await server.db.doc(`users/${uid}`).get()).data(),afterUser);assert.deepEqual((await server.db.doc(`students/${uid}`).get()).data(),afterStudent);
+  assert.deepEqual((await markRef.get()).data(),mark);assert.deepEqual((await server.db.doc(`noDueRequests/${requestId}`).get()).data(),request);
+  assert.deepEqual((await server.db.collection(`noDueRequests/${requestId}/approvals`).get()).docs.map(d=>[d.id,d.data()]),projections);
+  assert.deepEqual((await server.db.collection('enrollments').where('studentId','==',uid).get()).docs.map(d=>[d.id,d.data()]),enrollment.docs.map(d=>[d.id,d.data()]));
+  const normal=await api('provision',{row,requestId:`${prefix}-incomplete-reimport`});assert.equal(normal.uid,uid);assert.equal(normal.accountCreated,false);
+});
+test('repair rejects another identity and conflicting academic fields without modifying profiles',async()=>{
+  await login(`${prefix}-admin@demo.test`);const uid=created[0].uid,profile=(await server.db.doc(`students/${uid}`).get()).data();
+  await assert.rejects(api('repairDemoProfile',{expectedUid:uid,row:rows[1]}),e=>e.code==='functions/already-exists');
+  await assert.rejects(api('repairDemoProfile',{expectedUid:uid,row:{...rows[0],section:'C'}}),e=>e.code==='functions/already-exists');
+  assert.deepEqual((await server.db.doc(`students/${uid}`).get()).data(),profile);
+});
+test('only administrators may repair and the production branch refuses the action',async()=>{
+  await login(`${prefix}-mentor@demo.test`);await assert.rejects(api('repairDemoProfile',{expectedUid:created[0].uid,row:rows[0]}),e=>e.code==='functions/permission-denied');
+  await login(`${prefix}-admin@demo.test`);const service=createProvisioner({db:server.db,auth:server.auth,demo:false});
+  await assert.rejects(service.dispatch(ids.admin,{action:'repairDemoProfile',expectedUid:created[0].uid,row:rows[0]}),e=>e.code==='permission-denied');
 });
 test('production branch never issues demo passwords and reports activation delivery failure honestly',async()=>{
   await server.db.doc('settings/institution').set({allowedDomains:['college.invalid'],departments:['ISE'],sections:['A','B','C']},{merge:true});

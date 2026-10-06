@@ -2,6 +2,7 @@ import { db } from "./firebase-config.js";
 import { requireAuth, wireLogout } from "./auth.js";
 import { actOnStage1Item } from "./workflow.js";
 import { initThemeToggle } from "./theme.js";
+import {page as academicPage} from "./academic.js";
 
 import {
   collection,
@@ -29,6 +30,7 @@ let currentApprover = null;
 let pendingDocs = [];
 let unsubscribeApprovals = null;
 let queueLimit = 30;
+let taughtOfferings = new Set();
 
 
 // ============================================================
@@ -48,7 +50,7 @@ const ROLE_LABELS = {
 // AUTHENTICATION
 // ============================================================
 
-requireAuth(["subject_faculty", "library", "physics_lab", "chemistry_lab", "accounts", "mentor"]).then((approver) => {
+requireAuth(["subject_faculty", "library", "physics_lab", "chemistry_lab", "accounts", "mentor"]).then(async (approver) => {
 
   currentApprover = approver;
 
@@ -56,6 +58,10 @@ requireAuth(["subject_faculty", "library", "physics_lab", "chemistry_lab", "acco
     `${approver.name} · ${ROLE_LABELS[approver.role] || approver.role}` +
     `${approver.subjectCode ? " (" + approver.subjectCode + ")" : ""}`;
 
+  if(["subject_faculty","mentor"].includes(approver.role)) {
+    let cursor=null,more=true;
+    while(more) {const result=await academicPage("offerings",[["teacherId","==",approver.uid]],cursor,50);result.rows.filter(o=>o.active!==false).forEach(o=>taughtOfferings.add(o.id));cursor=result.cursor;more=result.more;}
+  }
   startApprovalListener(approver);
   setupNavigation();
 
@@ -87,7 +93,10 @@ function startApprovalListener(approver) {
 
       pendingDocs = snap.docs.flatMap(request => {
         const r = request.data();
-        return Object.entries(r.approvalItems || {}).filter(([id, item]) => item.approverId === approver.uid && r.approvalStates[id] === "pending").map(([id, item]) => ({ id, ref: { path: `noDueRequests/${request.id}/approvals/${id}` }, data: () => ({ ...item, studentName: r.studentName, usn: r.usn, section: r.section }) }));
+        return Object.entries(r.approvalItems || {}).filter(([id, item]) => item.approverId === approver.uid && r.approvalStates[id] === "pending"
+          && ["subject_faculty","library","accounts"].includes(item.approverType)
+          && (item.approverType!=="subject_faculty" || item.teacherUid===approver.uid && taughtOfferings.has(item.offeringId)))
+          .map(([id, item]) => ({ id, ref: { path: `noDueRequests/${request.id}/approvals/${id}` }, data: () => ({ ...item, studentName: r.studentName, usn: r.usn, section: r.section }) }));
       });
 
       // Do not destroy profile page when Firestore updates.

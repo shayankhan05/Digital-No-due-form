@@ -2,7 +2,7 @@ import { db } from "./firebase-config.js";
 import { doc, writeBatch, setDoc, serverTimestamp, arrayRemove } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { page, record } from "./academic.js";
 export const ROLES = ["student", "subject_faculty", "mentor", "hod", "office", "library", "physics_lab", "chemistry_lab", "accounts", "admin"];
-export const SERVICES = ["library", "physics_lab", "chemistry_lab", "accounts"];
+export const SERVICES = ["library", "accounts"];
 export function stableId(value) {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(value || "")) throw new Error("IDs must contain 1–128 letters, numbers, hyphens or underscores.");
   return value;
@@ -81,10 +81,15 @@ export async function preparePlan(uid) {
   }
   for (const enrollment of enrollments.rows.filter(e => e.active !== false)) {
     const offering = await record("offerings", enrollment.offeringId);
-    if (!offering || offering.semester !== student.semester || offering.section !== student.section) throw new Error(`Enrollment ${enrollment.id} does not match the current class. Deactivate it first.`);
+    if (!offering || offering.active===false || Number(offering.semester)!==Number(student.semester) || String(offering.section).trim().toUpperCase()!==String(student.section).trim().toUpperCase()) continue;
+    const department=v=>['ise','information science & engineering','information science and engineering'].includes(String(v || '').trim().toLowerCase())?'ise':String(v || '').trim().toLowerCase();
+    if(offering.department && department(offering.department)!==department(student.department) || offering.scheme && String(offering.scheme).trim()!==String(student.scheme || '').trim()) continue;
     await requireRole(offering.teacherId, ["subject_faculty", "mentor"]);
     offeringIds.push(offering.id); teacherIds.push(offering.teacherId);
-    items[`subject_${offering.id}`] = { approverType: "subject_faculty", approverId: offering.teacherId, label: offering.subjectName, subjectCode: offering.subjectCode, offeringId: offering.id };
+    const teacher=await record("users",offering.teacherId);
+    items[`subject_${offering.id}`] = { approverType: "subject_faculty", approverId: offering.teacherId, label: offering.subjectName, subjectCode: offering.subjectCode, offeringId: offering.id,
+      studentUid:uid,enrollmentId:enrollment.id,subjectName:offering.subjectName,teacherUid:offering.teacherId,teacherName:teacher.name || '',teacherEmail:teacher.email || '',
+      department:student.department || offering.department || '',scheme:String(student.scheme || offering.scheme || '').trim(),semester:Number(student.semester),section:String(student.section).trim().toUpperCase() };
     batch.update(doc(db, "enrollments", enrollment.id), { teacherId: offering.teacherId, mentorId: student.mentorId, semester: student.semester, section: student.section });
   }
   if (!offeringIds.length || offeringIds.length > 30) throw new Error("Assign 1–30 current subjects before preparing clearance.");

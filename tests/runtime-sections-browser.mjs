@@ -1,15 +1,15 @@
 // Real Chrome regression: provisioning -> 9-offering CSV -> repeated student CSV.
-// Demo emulator only; preserves marks and retains superseded legacy enrollments.
+// Isolated audit emulator only; retains superseded legacy enrollments.
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {readFile,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {parseCSV} from '../js/csv.js';
-import {localAdmin} from './bulk-fixture.mjs';
+import {auditAdmin,launchAuditBrowser} from './audit-browser-runtime.mjs';
 const require=createRequire(import.meta.url);
 const {chromium}=require(process.env.DEMO_PLAYWRIGHT_MODULE || 'playwright');
-const server=localAdmin('demo-digital-no-due',8180,9199);
-const base='http://127.0.0.1:5050',report={project:'demo-digital-no-due',checks:[],calls:[]};
+const server=auditAdmin();
+const base='http://127.0.0.1:5050',report={project:'demo-digital-no-due-audit',checks:[],calls:[]};
 const headers=['name','usn','collegeEmail','phone','department','semester','section','scheme','mentorEmail'];
 const quote=v=>'"'+String(v??'').replaceAll('"','""')+'"';
 let browser;
@@ -36,9 +36,9 @@ try {
   const marks=(await server.db.collection('marks').get()).docs.map(d=>({id:d.id,...d.data()}));
   const offerPath=fileURLToPath(new URL('../templates/local-test-offerings.csv',import.meta.url));
   const offerRows=parseCSV(await readFile(offerPath,'utf8'),['department','scheme','semester','section','subjectCode','subjectName','teacherEmail','components']);assert.equal(offerRows.length,9);
-  browser=await chromium.launch({headless:true,executablePath:process.env.DEMO_BROWSER_EXE || 'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+  browser=await launchAuditBrowser(chromium,{headless:true,executablePath:process.env.DEMO_BROWSER_EXE || 'C:/Program Files/Google/Chrome/Application/chrome.exe'});
   const admin=await login('admin@demo.test');await admin.page.locator('#importFile').waitFor();
-  admin.page.on('response',async response=>{if(response.url()==='http://127.0.0.1:5001/demo-digital-no-due/us-central1/institutionalAdmin') {const data=response.request().postDataJSON()?.data,result=(await response.json()).result;report.calls.push({action:data?.action,status:response.status(),uid:result?.uid,subjectsMapped:result?.subjectsMapped});}});
+  admin.page.on('response',async response=>{if(response.url()==='http://127.0.0.1:5002/demo-digital-no-due-audit/us-central1/institutionalAdmin') {const data=response.request().postDataJSON()?.data,result=(await response.json()).result;report.calls.push({action:data?.action,status:response.status(),uid:result?.uid,subjectsMapped:result?.subjectsMapped});}});
   await preview(admin.page,'offerings',offerPath);
   report.initialOfferingPreview=await admin.page.locator('#importPreview').innerText();
   if(report.initialOfferingPreview.includes('6 error rows')) {

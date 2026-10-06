@@ -1,15 +1,15 @@
-// End-to-end regression against the user's running LOCAL demo, through real pages.
+// End-to-end regression against isolated audit fixtures, through real pages.
 // Does not seed/reset data. Reimports existing rows and adds one synthetic C student.
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
-import {localAdmin} from './bulk-fixture.mjs';
+import {auditAdmin,launchAuditBrowser} from './audit-browser-runtime.mjs';
 const require=createRequire(import.meta.url);
 const {chromium}=require(process.env.DEMO_PLAYWRIGHT_MODULE || 'playwright');
-const server=localAdmin('demo-digital-no-due',8180,9199);
+const server=auditAdmin();
 const base='http://127.0.0.1:5050';
-const report={project:'demo-digital-no-due',calls:[],imports:[],browserChecks:[]};
+const report={project:'demo-digital-no-due-audit',calls:[],imports:[],browserChecks:[]};
 let browser;
 const rows=[],uids=new Map();
 const offerings=['demo-dbms-5-C','demo-java-5-C','demo-os-5-C'];
@@ -45,10 +45,10 @@ try {
   const fresh={...rows.find(r=>r.section==='C'),name:'Synthetic browser import student',usn:`RUNTIME${suffix}`,collegeEmail:`runtime-import-${suffix}@demo.test`};
   rows.push(fresh);
   const csv=[headers.join(','),...rows.map(r=>headers.map(k=>quote(r[k])).join(','))].join('\r\n');
-  browser=await chromium.launch({headless:true,executablePath:process.env.DEMO_BROWSER_EXE || 'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+  browser=await launchAuditBrowser(chromium,{headless:true,executablePath:process.env.DEMO_BROWSER_EXE || 'C:/Program Files/Google/Chrome/Application/chrome.exe'});
   const {context:adminContext,page:adminPage}=await login('admin@demo.test');
   adminPage.on('response',async response=>{
-    if(response.url()==='http://127.0.0.1:5001/demo-digital-no-due/us-central1/institutionalAdmin') {
+    if(response.url()==='http://127.0.0.1:5002/demo-digital-no-due-audit/us-central1/institutionalAdmin') {
       const data=response.request().postDataJSON()?.data,result=(await response.json()).result;
       report.calls.push({action:data?.action,status:response.status(),uid:result?.uid,subjectsMapped:result?.subjectsMapped});
     }

@@ -279,7 +279,7 @@ function showDashboard() {
     <div class="banner" style="margin-bottom:18px;">
 
       Students appear for mentor approval only after completing
-      all Stage 1 approvals — subjects, labs, library and accounts.
+      all Stage 1 approvals — subject teachers, library and accounts.
 
     </div>
 

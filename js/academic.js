@@ -24,7 +24,7 @@ export async function academicDetails(uid) {
     const [teacher, assignments] = await Promise.all([record("users", offering.teacherId), page("assignments", [["offeringId", "==", offering.id]], null, 50)]);
     return { enrollment, offering, teacher, marks, assignments: assignments.rows };
   }));
-  return { student, mentor, subjects };
+  return { student, mentor, subjects: subjects.filter(({offering})=>offering.active!==false) };
 }
 export function academicHTML(details) {
   return `${profileHTML(details.student)}<div class="card"><h2>Mentor</h2>${details.mentor ? `${e(details.mentor.name)}<br>${e(details.mentor.email)}<br>${e(details.mentor.phone)}` : "No mentor linked. Contact the administrator."}</div>

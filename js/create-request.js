@@ -10,7 +10,7 @@ const content = document.getElementById("content");
 requireAuth(["student"]).then(async (profile) => {
   const student = await studentProfile(profile.uid, profile);
   const required = await getRequiredApprovers(profile.uid);
-  const chips = required.map((r) => `<span class="badge badge-locked" style="margin:0 6px 6px 0; display:inline-block;">${e(r.label)}</span>`).join("");
+  const chips = required.map((r) => `<span class="badge badge-locked" style="margin:0 6px 6px 0; display:inline-block;">${e(r.subjectCode || '')} ${e(r.label)}${r.teacherName ? ` — ${e(r.teacherName)}`:''}</span>`).join("");
 
   content.innerHTML = `
     <div class="card">
@@ -25,7 +25,7 @@ requireAuth(["student"]).then(async (profile) => {
 
     <p class="section-label">Approval requirements</p>
     <div style="margin-bottom:8px;">${chips}</div>
-    <div class="banner">Required approvers are automatically assigned based on your semester and section. You cannot select or remove approvers.</div>
+    <div class="banner">Your enrolled subject teachers, Library and Accounts approve first, followed by Mentor, HOD and Office. You cannot select or remove approvers.</div>
 
     <label style="display:flex; align-items:flex-start; gap:8px; font-size:13px; color:var(--text);">
       <input type="checkbox" id="confirmCheck" style="width:auto; margin:2px 0 0;" />

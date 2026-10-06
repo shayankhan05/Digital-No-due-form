@@ -1,0 +1,34 @@
+// Recheck the five offering fixtures in isolated audit emulators through Chrome.
+// Uses their current stored assessment configuration; creates no test students.
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {writeFile} from 'node:fs/promises';
+import {auditAdmin,launchAuditBrowser} from './audit-browser-runtime.mjs';
+const require=createRequire(import.meta.url),{chromium}=require(process.env.DEMO_PLAYWRIGHT_MODULE || 'playwright');
+const server=auditAdmin(),base='http://127.0.0.1:5050',targets=[['BCS511','A','aarav.mehta@demo.test'],['BCS512','B','nida.farooq@demo.test'],['BCS513','C','rohit.kulkarni@demo.test'],['BCS514','B','sana.mir@demo.test'],['BCS515','C','vivek.reddy@demo.test']];
+const report={imports:[],classes:[],errors:[],frontendMapCalls:0};let browser;
+const txt=v=>String(v??'').trim(),department=v=>['ise','information science & engineering','information science and engineering'].includes(txt(v).toLowerCase())?'ISE':txt(v);
+async function snapshot(collection){return new Map((await server.db.collection(collection).get()).docs.map(d=>[d.id,JSON.stringify(d.data())]));}
+async function login(email){const context=await browser.newContext({viewport:{width:1366,height:900}}),page=await context.newPage();page.setDefaultTimeout(60000);page.on('pageerror',e=>report.errors.push(e.message));await page.goto(`${base}/login.html?emulator=1`);await page.locator('#email').fill(email);await page.locator('#password').fill('DemoPassword123!');await page.getByRole('button',{name:'Log in',exact:true}).click();await page.waitForURL(/.*-dashboard\.html/);return {context,page};}
+try {
+  const marks=await snapshot('marks'),offers=await snapshot('offerings'),enrollments=await snapshot('enrollments'),students=(await server.db.collection('students').get()).docs.map(d=>({uid:d.id,...d.data()})),rows=[];
+  for(const [code,section,email] of targets){const matches=[...offers].map(([id,data])=>({id,...JSON.parse(data)})).filter(o=>o.subjectCode===code&&o.section===section&&o.department==='ISE'&&o.scheme==='2022'&&o.semester===5);assert.equal(matches.length,1);const o=matches[0];assert.equal(o.teacherId,(await server.auth.getUserByEmail(email)).uid);const matching=students.filter(s=>department(s.department)==='ISE'&&txt(s.scheme)==='2022'&&Number(s.semester)===5&&txt(s.section).toUpperCase()===section);report.classes.push({email,offeringId:o.id,code,section,matchingStudentIds:matching.map(s=>s.uid).sort(),matchingStudents:matching.length});rows.push({department:o.department,scheme:o.scheme,semester:o.semester,section:o.section,subjectCode:o.subjectCode,subjectName:o.subjectName,teacherEmail:email,credits:o.credits,components:JSON.stringify(o.components)});}
+  const headers=Object.keys(rows[0]),quote=v=>'"'+String(v??'').replaceAll('"','""')+'"',csv=[headers.join(','),...rows.map(r=>headers.map(k=>quote(r[k])).join(','))].join('\r\n');assert.ok(!headers.includes('active'));
+  browser=await launchAuditBrowser(chromium,{headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});const admin=await login('admin@demo.test');
+  admin.page.on('response',async response=>{if(!response.url().startsWith('http://127.0.0.1:5001/'))return;const action=response.request().postDataJSON()?.data?.action;if(action==='mapClass')report.frontendMapCalls++;if(action==='importOffering'){const payload=await response.json();report.imports.push(payload.result??payload.data);}});
+  for(let repeat=0;repeat<2;repeat++) {
+    await admin.page.goto(`${base}/admin-dashboard.html`);await admin.page.locator('#importType').selectOption('offerings');await admin.page.locator('#importFile').setInputFiles({name:'live-offering-mapping-check.csv',mimeType:'text/csv',buffer:Buffer.from(csv)});await admin.page.locator('#previewBtn').click();await admin.page.waitForFunction(()=>!document.getElementById('previewBtn').disabled&&document.getElementById('importProgress').textContent.startsWith('Preview ready'));assert.match(await admin.page.locator('#importPreview').innerText(),/5 rows uploaded · 5 valid.*0 error rows/);
+    await admin.page.locator('#acceptWarnings').check();await admin.page.locator('#importBtn').click();await admin.page.waitForFunction(()=>document.getElementById('importProgress').textContent.includes('rows completed'));assert.match(await admin.page.locator('#importProgress').innerText(),/5\/5 rows completed; 0 failed or skipped/);assert.match(await admin.page.locator('#importResults').innerText(),/matching students mapped/);
+  }
+  assert.equal(report.frontendMapCalls,0);assert.equal(report.imports.length,10);
+  for(const o of report.classes) {
+    const imports=report.imports.filter(r=>r.id===o.offeringId);assert.equal(imports.length,2);assert.ok(imports.every(r=>r.active===true&&r.studentsMatched===o.matchingStudents&&r.studentsMapped===o.matchingStudents&&r.mappingErrors.length===0));
+    const roster=await server.db.collection('enrollments').where('offeringId','==',o.offeringId).where('active','==',true).get();assert.deepEqual(roster.docs.map(d=>d.data().studentId).sort(),o.matchingStudentIds);o.mappedStudents=roster.size;
+    const teacher=await login(o.email);await teacher.page.goto(`${base}/academic.html?emulator=1`);const button=teacher.page.locator(`.class-button[data-id="${o.offeringId}"]`);await button.waitFor();await button.click();await teacher.page.waitForFunction(()=>document.querySelector('#classContent')?.textContent.includes('No-Due:')||document.querySelector('#classContent')?.textContent.includes('No enrolled students.'));
+    const visible=await teacher.page.locator('#classContent .marks-form').evaluateAll(forms=>forms.map(f=>f.dataset.id));assert.deepEqual(visible.sort(),roster.docs.map(d=>d.id).sort());o.browserLogin=true;o.noCrossSectionLeakage=true;await teacher.context.close();
+  }
+  const afterMarks=await snapshot('marks');assert.deepEqual(afterMarks,marks);const afterOffers=await snapshot('offerings');assert.deepEqual(afterOffers,offers);
+  const afterEnrollments=await snapshot('enrollments');for(const [id,data] of enrollments)assert.equal(afterEnrollments.get(id),data,`Existing enrollment changed: ${id}`);
+  report.marksUnchanged=true;report.offeringsUnchanged=true;report.existingEnrollmentsUnchanged=true;assert.deepEqual(report.errors,[]);report.passed=true;await admin.context.close();
+}catch(error){report.passed=false;report.error=error.stack;throw error;}
+finally {await writeFile(new URL('offering-mapping-results.json',import.meta.url),JSON.stringify(report,null,2));if(browser)await browser.close();await server.app.delete();console.log(JSON.stringify({passed:report.passed,classes:report.classes.map(({code,section,matchingStudents,mappedStudents})=>({code,section,matchingStudents,mappedStudents})),error:report.error},null,2));}

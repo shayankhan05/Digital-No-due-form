@@ -15,12 +15,13 @@ import {getFirestore,connectFirestoreEmulator} from 'firebase/firestore';
 let env,requestId;
 const db=uid=>env.authenticatedContext(uid).firestore();
 const as=uid=>useContext(db(uid),uid);
-const items={faculty:{approverType:'subject_faculty',approverId:'t1',offeringId:'dbmsC',subjectCode:'DBMS',label:'DBMS'},...Object.fromEntries(['library','physics_lab','chemistry_lab','accounts'].map(type=>[type,{approverType:type,approverId:type,offeringId:null,subjectCode:null,label:type}]))};
+const items={faculty:{approverType:'subject_faculty',approverId:'t1',offeringId:'dbmsC',subjectCode:'DBMS',label:'DBMS'},...Object.fromEntries(['library','accounts'].map(type=>[type,{approverType:type,approverId:type,offeringId:null,subjectCode:null,label:type}]))};
 const initialStates=Object.fromEntries(Object.keys(items).map(k=>[k,'pending']));
 const plan={valid:true,items,initialStates,approverIds:Object.values(items).map(i=>i.approverId),mentorId:'m1',hodId:'h1',officeId:'o1',semester:6,section:'C'};
 before(async()=>{
-  const projectId=process.env.TEST_PROJECT_ID || 'demo-digital-no-due';
-  if(!projectId.startsWith('demo-')) throw new Error('Tests require a demo project.');
+  const projectId=process.env.TEST_PROJECT_ID;
+  if(projectId!=='demo-digital-no-due-audit' || Number(process.env.TEST_FIRESTORE_PORT)!==8181 || Number(process.env.TEST_AUTH_PORT)!==9200)
+    throw new Error('Security tests may clear ONLY demo-digital-no-due-audit on Firestore 8181/Auth 9200. Use npm run audit; the running demo is protected.');
   env=await initializeTestEnvironment({projectId,firestore:{host:'127.0.0.1',port:Number(process.env.TEST_FIRESTORE_PORT || 8180),rules:await readFile(new URL('../firestore.rules',import.meta.url),'utf8')}});
   await env.clearFirestore();
   await env.withSecurityRulesDisabled(async context=>{
@@ -69,11 +70,16 @@ test('student cannot elevate roles or forge institutional records',async()=>{
   await assertFails(updateDoc(doc(db('s1'),'students','s1'),{semester:9}));
   await assertFails(setDoc(doc(db('t1'),'subjects','fake'),{name:'Fake',code:'FAKE'}));
 });
-test('request auto-populates profile and five required approvers; forged request fails',async()=>{
+test('request auto-populates profile, exact teacher, library and accounts; forged request fails',async()=>{
   as('s1');requestId=await submitRequest();const r=(await getDoc(doc(db('s1'),'noDueRequests',requestId))).data();
-  assert.equal(r.usn,'USNs1');assert.equal(r.mentorId,'m1');assert.equal(r.remaining,5);assert.equal(r.approvalItems.faculty.approverId,'t1');
+  assert.equal(r.usn,'USNs1');assert.equal(r.mentorId,'m1');assert.equal(r.remaining,3);assert.equal(r.approvalItems.faculty.approverId,'t1');
+  assert.equal(r.approvalItems.physics_lab,undefined);assert.equal(r.approvalItems.chemistry_lab,undefined);
+  await assertSucceeds(getDoc(doc(db('t1'),'noDueRequests',requestId,'approvals','faculty')));
+  await assertFails(getDoc(doc(db('t2'),'noDueRequests',requestId,'approvals','faculty')));
+  await assertFails(getDoc(doc(db('t1'),'noDueRequests',requestId,'approvals','library')));
   await assertFails(setDoc(doc(db('s1'),'noDueRequests','forged'),{...r,studentId:'s2',createdAt:serverTimestamp()}));
   await assertFails(setDoc(doc(db('s1'),'noDueRequests','omitted'),{...r,remaining:0,approvalStates:{},createdAt:serverTimestamp()}));
+  await assertFails(setDoc(doc(db('s1'),'noDueRequests','falseVersion'),{...r,workflowVersion:3,createdAt:serverTimestamp()}));
   await assertFails(updateDoc(doc(db('s1'),'noDueRequests',requestId),{status:'cleared'}));
   await assertFails(getDoc(doc(db('s2'),'noDueRequests',requestId)));
   await assertFails(getDoc(doc(db('m2'),'noDueRequests',requestId)));
@@ -90,7 +96,7 @@ test('parallel approvals, mentor/HOD rejection and office issuance follow exact 
   as('t2');await assert.rejects(()=>actOnStage1Item(requestId,'faculty','approved',''));
   as('h1');await assert.rejects(()=>actAsHod(requestId,'approved',''));
   as('t1');await actOnStage1Item(requestId,'faculty','approved','');
-  for(const type of ['library','physics_lab','chemistry_lab','accounts']) {as(type);await actOnStage1Item(requestId,type,'approved','');}
+  for(const type of ['library','accounts']) {as(type);await actOnStage1Item(requestId,type,'approved','');}
   assert.equal((await getDoc(doc(db('s1'),'noDueRequests',requestId))).data().status,'pending_mentor');
   as('m1');await actAsMentor(requestId,'rejected','Mentor meeting pending');as('s1');await resubmit(requestId);
   as('m1');await actAsMentor(requestId,'approved','');as('h1');await actAsHod(requestId,'rejected','Department review pending');
@@ -150,10 +156,16 @@ test('forged complete transaction cannot skip remaining Stage 1 approvals',async
   await assertFails(batch.commit());
 });
 test('concurrent decisions keep counter and notification versions consistent',async()=>{
-  await env.withSecurityRulesDisabled(c=>setDoc(doc(c.firestore(),'students','s1','clearance','plan'),{...plan,items:{...items,faculty2:items.faculty},initialStates:{...initialStates,faculty2:'pending'}}));
+  await env.withSecurityRulesDisabled(async c=>{
+    const b=writeBatch(c.firestore());
+    b.set(doc(c.firestore(),'offerings','dbmsSecondC'),{subjectId:'dbms',subjectCode:'DBMS2',subjectName:'Second subject',teacherId:'t1',semester:6,section:'C',active:true});
+    b.set(doc(c.firestore(),'enrollments','s1__dbmsSecondC'),{studentId:'s1',offeringId:'dbmsSecondC',teacherId:'t1',active:true});
+    b.set(doc(c.firestore(),'students','s1','clearance','plan'),{...plan,items:{...items,faculty2:{...items.faculty,offeringId:'dbmsSecondC',subjectCode:'DBMS2'}},initialStates:{...initialStates,faculty2:'pending'}});
+    await b.commit();
+  });
   as('s1');const id=await submitRequest();as('t1');
   await Promise.all([actOnStage1Item(id,'faculty','approved',''),actOnStage1Item(id,'faculty2','approved','')]);
-  const r=(await getDoc(doc(db('s1'),'noDueRequests',id))).data();assert.equal(r.remaining,4);assert.equal(r.version,2);assert.equal(r.approvalStates.faculty,'approved');assert.equal(r.approvalStates.faculty2,'approved');
+  const r=(await getDoc(doc(db('s1'),'noDueRequests',id))).data();assert.equal(r.remaining,2);assert.equal(r.version,2);assert.equal(r.approvalStates.faculty,'approved');assert.equal(r.approvalStates.faculty2,'approved');
   assert.equal((await getDoc(doc(db('s1'),'users','s1','notifications',`${id}_1`))).exists(),true);
   assert.equal((await getDoc(doc(db('s1'),'users','s1','notifications',`${id}_2`))).exists(),true);
 });

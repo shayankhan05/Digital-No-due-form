@@ -1590,6 +1590,7 @@ button, .btn { white-space: normal; }
   padding: 4px 6px;
 }
 .subject-info { flex: 1 1 0; min-width: 0; }
+.subject-info span { display: block; overflow-wrap: anywhere; }
 .subject-info strong {
   white-space: normal;
   overflow: visible;
@@ -1645,6 +1646,18 @@ body:has(.academic-links) .app-shell { flex: 1 1 0; height: auto; min-height: 0;
 .provision-actions { width: 100%; align-items: stretch; }
 
 /* Keep the login card and its footer together inside the phone-style frame. */
+.office-search-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+.office-search-bar input { flex: 1 1 180px; min-width: 0; margin: 0; }
+.office-search-bar button { flex: 0 1 auto; }
+.office-search-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 12px; margin-top: 14px; }
+.office-search-filters label { min-width: 0; }
+.office-search-filters :is(input, select) { width: 100%; min-width: 0; box-sizing: border-box; }
+.office-search-student { min-width: 0; overflow-wrap: anywhere; margin-bottom: 14px; }
+.office-search-student h3 { margin-top: 0; }
+@media (max-width: 520px) {
+  .office-search-filters { grid-template-columns: 1fr; }
+  .office-search-bar > button { width: 100%; }
+}
 .login-wrap {
   width: 100%;
   max-width: 480px;

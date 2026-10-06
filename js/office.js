@@ -1,4 +1,5 @@
-import { db } from "./firebase-config.js";
+import { db, functions } from "./firebase-config.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-functions.js";
 import { requireAuth, wireLogout } from "./auth.js";
 import {
   issueHallTicket,
@@ -277,52 +278,26 @@ function renderDashboard(students) {
         Search Student
       </h2>
 
-      <div
-        style="
-          display:flex;
-          gap:8px;
-          align-items:center;
-        ">
-
-        <input
-          id="usnInput"
-          type="text"
-          placeholder="Enter USN"
-          style="
-            margin:0;
-            flex:1;
-          "
-        />
-
-        <button
-          id="searchBtn"
-          class="btn-primary"
-          style="
-            white-space:nowrap;
-          ">
-          Search
-        </button>
-
-      </div>
-
-      <p
-        class="muted"
-        style="
-          margin-bottom:0;
-          margin-top:10px;
-        ">
-
-        Search a student's clearance and hall-ticket status
-        using their USN.
-
-      </p>
-
+      <form id="officeSearchForm">
+        <label for="usnInput">Name / USN / student ID / college email</label>
+        <div class="office-search-bar">
+          <input id="usnInput" type="search" placeholder="Name / USN / Email" maxlength="200" autocomplete="off" />
+          <button id="searchBtn" class="btn-primary" type="submit">Search</button>
+        </div>
+        <div class="office-search-filters">
+          <label>Department<input id="officeDepartment" placeholder="Any department" maxlength="200" /></label>
+          <label>Semester<select id="officeSemester"><option value="">Any semester</option>${Array.from({length:12},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
+          <label>Section<input id="officeSection" placeholder="Any section" maxlength="10" /></label>
+          <label>Narrow by USN<input id="officeUsnFilter" placeholder="Any USN" maxlength="200" /></label>
+          <label>Narrow by email<input id="officeEmailFilter" placeholder="Any email" maxlength="200" /></label>
+        </div>
+      </form>
+      <p class="muted" style="margin-bottom:0">Search partial names, an exact USN, student ID or college email. Apply filters with Search.</p>
     </div>
-
 
     <!-- SEARCH RESULT -->
 
-    <div id="searchResult"></div>
+    <div id="searchResult" aria-live="polite"></div><div id="searchedStudentDetails"></div>
 
 
     <!-- READY STUDENTS -->
@@ -377,31 +352,7 @@ function renderDashboard(students) {
   // SEARCH EVENTS
   // ----------------------------------------------------------
 
-  const searchButton =
-    document.getElementById("searchBtn");
-
-  const usnInput =
-    document.getElementById("usnInput");
-
-
-  searchButton?.addEventListener(
-    "click",
-    searchStudent
-  );
-
-
-  usnInput?.addEventListener(
-    "keydown",
-    (event) => {
-
-      if (event.key === "Enter") {
-        searchStudent();
-      }
-
-    }
-  );
-
-
+  document.getElementById('officeSearchForm')?.addEventListener('submit',event=>{event.preventDefault();searchStudent();});
   // ----------------------------------------------------------
   // ISSUE BUTTONS
   // ----------------------------------------------------------
@@ -622,136 +573,35 @@ function clearedStudentCard(student) {
 // SEARCH STUDENT
 // ============================================================
 
-async function searchStudent() {
-
-  const input =
-    document.getElementById("usnInput");
-
-  const searchResult =
-    document.getElementById("searchResult");
-
-
-  if (!input || !searchResult) {
-    return;
+let officeSearchVersion=0,officeSearchRows=[],officeSearchCursor=null,officeSearchPayload=null;
+async function searchStudent(append=false) {
+  const target=document.getElementById('searchResult');if(!target)return;
+  const version=++officeSearchVersion;
+  if(!append){
+    officeSearchRows=[];officeSearchCursor=null;
+    officeSearchPayload={term:document.getElementById('usnInput').value.trim(),filters:{department:document.getElementById('officeDepartment').value.trim(),semester:document.getElementById('officeSemester').value,section:document.getElementById('officeSection').value.trim(),usn:document.getElementById('officeUsnFilter').value.trim(),email:document.getElementById('officeEmailFilter').value.trim()}};
+    document.getElementById('searchedStudentDetails').innerHTML='';
   }
-
-
-  const usn =
-    input.value.trim();
-
-
-  if (!usn) {
-
-    alert("Please enter a USN.");
-
-    return;
-
-  }
-
-
-  searchResult.innerHTML = `
-
-    <div class="center-state">
-      Searching…
-    </div>
-
-  `;
-
-
-  try {
-
-    const studentQuery =
-      query(
-        collection(db, "noDueRequests"),
-        where("usn", "==", usn), where("officeId", "==", officer.uid), orderBy("createdAt", "desc"), limit(10)
-      );
-
-
-    const snapshot =
-      await getDocs(studentQuery);
-
-
-    if (snapshot.empty) {
-
-      searchResult.innerHTML = `
-
-        <div class="center-state">
-
-          No request found for
-          ${escapeHtml(usn)}.
-
-        </div>
-
-      `;
-
-      return;
-
-    }
-
-
-    const requests =
-      snapshot.docs
-        .map((docSnap) => ({
-          id: docSnap.id,
-          ...docSnap.data()
-        }))
-        .sort((a, b) =>
-          (b.createdAt?.seconds || 0) -
-          (a.createdAt?.seconds || 0)
-        );
-
-
-    const request =
-      requests[0];
-
-
-    const approvalsSnapshot =
-      await getDocs(
-        collection(
-          db,
-          "noDueRequests",
-          request.id,
-          "approvals"
-        )
-      );
-
-
-    const approvalItems =
-      approvalsSnapshot.docs.map(
-        (docSnap) => docSnap.data()
-      );
-
-
-    renderSearchResult(
-      request,
-      approvalItems
-    );
-
-  } catch (error) {
-
-    console.error(error);
-
-    searchResult.innerHTML = `
-
-      <div class="center-state">
-
-        Search failed.
-
-        <br>
-
-        <span class="muted">
-          ${escapeHtml(error.message)}
-        </span>
-
-      </div>
-
-    `;
-
-  }
-
+  if(!officeSearchPayload.term){target.innerHTML='<div class="center-state">Enter a name, USN, student ID or college email.</div>';return;}
+  target.innerHTML='<div class="center-state">Searching…</div>';
+  try{
+    const result=(await httpsCallable(functions,'officeStudentSearch')({...officeSearchPayload,cursor:officeSearchCursor})).data;
+    if(version!==officeSearchVersion||!target.isConnected)return;
+    const seen=new Set(officeSearchRows.map(row=>row.uid));for(const row of result.rows)if(!seen.has(row.uid)){officeSearchRows.push(row);seen.add(row.uid);}
+    officeSearchCursor=result.nextCursor;
+    const count=officeSearchRows.length;
+    target.innerHTML=`<p id="officeSearchCount">${count} student${count===1?'':'s'} found${result.mode==='name'?' with this name':''}${result.more?' so far':''}</p>
+      ${count?officeSearchRows.map(row=>`<article class="card office-search-student" data-student-uid="${escapeHtml(row.uid)}">
+        <h3>${escapeHtml(row.name||'Student')}</h3><p>USN: ${escapeHtml(row.usn||'—')}</p>
+        <p>${escapeHtml(row.department||'—')} · Semester ${escapeHtml(row.semester??'—')} · Section ${escapeHtml(row.section||'—')}</p>
+        <p>Email: ${escapeHtml(row.email||'—')}</p><p>No-Due: ${escapeHtml(row.status.noDue)}</p><p>Hall Ticket: ${escapeHtml(row.status.hallTicket)}</p>
+        ${row.request?`<button type="button" class="btn-primary btn-block office-view-request" data-uid="${escapeHtml(row.uid)}">${row.request.status===STATUS.CLEARED?'View request / Issue Hall Ticket':'View request'}</button>`:''}
+      </article>`).join(''):'<div class="center-state">No matching students found in this page.</div>'}
+      ${result.more?'<button id="officeSearchMore" type="button" class="btn-sm">Search more matching students</button><p class="muted">More candidates remain. Continue to include every match.</p>':''}`;
+    target.querySelector('#officeSearchMore')?.addEventListener('click',()=>searchStudent(true));
+    target.querySelectorAll('.office-view-request').forEach(button=>button.addEventListener('click',()=>{const student=officeSearchRows.find(row=>row.uid===button.dataset.uid);renderSearchResult(student.request,[]);document.getElementById('searchedStudentDetails').scrollIntoView({behavior:'smooth',block:'start'});}));
+  }catch(error){if(version!==officeSearchVersion)return;target.innerHTML=`<div class="center-state">Search failed.<br><span class="muted">${escapeHtml(error.message)}</span><button id="officeSearchRetry" type="button" class="btn-sm">Retry search</button></div>`;target.querySelector('#officeSearchRetry')?.addEventListener('click',()=>searchStudent(append));}
 }
-
-
 // ============================================================
 // SEARCH RESULT
 // ============================================================
@@ -762,7 +612,7 @@ function renderSearchResult(
 ) {
 
   const searchResult =
-    document.getElementById("searchResult");
+    document.getElementById("searchedStudentDetails");
 
 
   if (!searchResult) {
@@ -784,7 +634,9 @@ function renderSearchResult(
 
   const checklistRows = [
 
-    ...items.map((item) =>
+    ...(request.approvalItems ? Object.entries(request.approvalItems).map(([id,item])=>({...item,status:request.approvalStates[id]})) : items)
+      .filter(item=>['subject_faculty','library','accounts'].includes(item.approverType))
+      .map((item) =>
       checkRow(
         item.label ||
         item.approverType,

@@ -313,7 +313,7 @@ function showDashboard() {
 
       <div class="modern-section-title">
 
-        <h2>Your Subjects</h2>
+        <h2>My Subjects & Teachers</h2>
 
         <span>
           ${subjects.length} subjects
@@ -343,6 +343,9 @@ function showDashboard() {
                   <span>
                     ${escapeHtml(subject.subjectCode || "")}
                   </span>
+                  <span>Teacher: ${escapeHtml(subject.teacherName || "Not linked")}</span>
+                  <span>${escapeHtml(subject.teacherEmail || "")}</span>
+                  <span>Semester ${escapeHtml(subject.semester || student.semester)} · Section ${escapeHtml(subject.section || student.section)}</span>
 
                 </div>
 
@@ -765,7 +768,7 @@ function requestStatusHTML(request) {
     case "pending_stage1":
 
       message =
-        "Waiting for faculty, library, laboratory and accounts approvals.";
+        "Waiting for your subject teachers, library and accounts approvals.";
 
       break;
 

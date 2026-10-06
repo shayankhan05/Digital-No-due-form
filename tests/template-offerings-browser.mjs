@@ -4,10 +4,10 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {readFile,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
-import {localAdmin} from './bulk-fixture.mjs';
+import {auditAdmin,launchAuditBrowser} from './audit-browser-runtime.mjs';
 import {parseCSV} from '../js/csv.js';
 const require=createRequire(import.meta.url),{chromium}=require(process.env.DEMO_PLAYWRIGHT_MODULE || 'playwright');
-const server=localAdmin('demo-digital-no-due',8180,9199),base='http://127.0.0.1:5050',stamp=Date.now(),report={downloads:[],imports:[],teachers:[],students:[],errors:[]};let browser;
+const server=auditAdmin(),base='http://127.0.0.1:5050',stamp=Date.now(),report={downloads:[],imports:[],teachers:[],students:[],errors:[]};let browser;
 const csvPath=new URL('../templates/demo-teacher-offerings.csv',import.meta.url),rows=parseCSV(await readFile(csvPath,'utf8'),['department','scheme','semester','section','subjectCode','subjectName','teacherEmail','credits','components']);
 async function login(email) {
   const context=await browser.newContext({acceptDownloads:true,viewport:{width:1366,height:900}}),page=await context.newPage();page.setDefaultTimeout(60000);page.on('pageerror',e=>report.errors.push(e.message));page.on('dialog',d=>d.dismiss());
@@ -22,7 +22,7 @@ async function confirm(page) {
 }
 async function originalMarks(){return new Map((await server.db.collection('marks').get()).docs.map(d=>[d.id,JSON.stringify(d.data())]));}
 try {
-  const marksBefore=await originalMarks();browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});const admin=await login('admin@demo.test');await admin.page.locator('#importType').waitFor();
+  const marksBefore=await originalMarks();browser=await launchAuditBrowser(chromium,{headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});const admin=await login('admin@demo.test');await admin.page.locator('#importType').waitFor();
   for(const [name,label] of [['student-import','Student template'],['teacher-import','Teacher template'],['offering-import','Offering template'],['ise-5c-2022-confirmed','Confirmed ISE 5C source']]) {
     const link=admin.page.getByRole('link',{name:label,exact:true});assert.equal(await link.getAttribute('href'),`templates/${name}.csv`);
     const downloaded=admin.page.waitForEvent('download');await link.click();const download=await downloaded;assert.equal(await download.failure(),null);assert.equal(download.suggestedFilename(),`${name}.csv`);

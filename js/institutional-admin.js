@@ -72,19 +72,17 @@ async function render() {
         const row=checked.row;
         try {
           const result=type==='students'?await api('provision',{row,requestId:`${jobId}-${checked.index}`}):type==='teachers'?await api('importTeacher',{row}):await api('importOffering',{row});results.push({...row,...result,error:''});
-          if(type==='offerings' && row.active) {
-            let cursor=null;do {const mapped=await api('mapClass',{department:row.department,scheme:row.scheme,semester:Number(row.semester),section:row.section,cursor});const errors=mapped.results.filter(r=>r.error);if(errors.length) results.at(-1).error += errors.map(r=>`${r.uid}: ${r.error}`).join('; ');cursor=mapped.nextCursor;} while(cursor);
-          }
+          if(type==='offerings' && result.mappingErrors?.length)results.at(-1).error=result.mappingErrors.map(r=>`${r.uid}: ${r.error}`).join('; ');
         } catch(error) {results.push({...row,error:error.message,accountCreated:false});}
         document.getElementById('importProgress').textContent=`Processed ${results.length}/${valid.length}; ${results.filter(r=>r.error).length} errors.`;
       }
       results.push(...preview.filter(r=>r.status==='ERROR').map(r=>({...r.row,error:r.error,accountCreated:false})));
       document.getElementById('importProgress').textContent=`${results.filter(r=>!r.error).length}/${preview.length} rows completed; ${results.filter(r=>r.error).length} failed or skipped.`;
-      document.getElementById('importResults').innerHTML=results.map(r=>`<p>${e(r.name || r.subjectName)} · ${e(r.usn || r.employeeId || r.subjectCode)} · ${e(r.email || r.collegeEmail || r.teacherEmail)} · ${e(r.error || r.warning || (type==='teachers'?(r.accountUpdated?'Teacher updated':'Teacher created'):r.subjectsMapped !== undefined ? r.subjectsMapped + ' subjects mapped' : 'Complete'))} ${r.activation?'· activation '+e(r.activation):''}</p>`).join('');document.getElementById('downloadReport').disabled=false;
+      document.getElementById('importResults').innerHTML=results.map(r=>`<p>${e(r.name || r.subjectName)} · ${e(r.usn || r.employeeId || r.subjectCode)} · ${e(r.email || r.collegeEmail || r.teacherEmail)} · ${e(r.error || r.warning || (type==='teachers'?(r.accountUpdated?'Teacher updated':'Teacher created'):type==='offerings'?r.studentsMapped+' / '+r.studentsMatched+' matching students mapped':r.subjectsMapped !== undefined ? r.subjectsMapped + ' subjects mapped' : 'Complete'))} ${r.activation?'· activation '+e(r.activation):''}</p>`).join('');document.getElementById('downloadReport').disabled=false;
     } finally {controls.forEach(id=>document.getElementById(id).disabled=false);}
   });
   document.getElementById('downloadReport').onclick=()=>{
-    const headers=['name','usn','email','section','accountCreated','academicMappingCreated','mentorMapped','subjectsMapped','activation','error','warning','employeeId','role','uid','accountUpdated'],quote=v=>'"'+String(v??'').replaceAll('"','""')+'"';
+    const headers=['name','usn','email','section','accountCreated','academicMappingCreated','mentorMapped','subjectsMapped','activation','error','warning','employeeId','role','uid','accountUpdated','studentsMatched','studentsMapped'],quote=v=>'"'+String(v??'').replaceAll('"','""')+'"';
     const csv=[headers.join(','),...results.map(r=>headers.map(k=>quote(r[k])).join(','))].join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='institutional-import-results.csv';a.click();URL.revokeObjectURL(url);
   };
   document.getElementById('searchBtn').onclick=event=>busy(event.target,async()=>{

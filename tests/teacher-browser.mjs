@@ -1,14 +1,14 @@
 // Actual Chrome -> admin upload/preview/confirm -> local callable Functions.
-// Add only uniquely named synthetic fixtures; never reset or delete demo data.
+// Add uniquely named synthetic fixtures only to the isolated audit emulators.
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {readFile,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
-import {localAdmin} from './bulk-fixture.mjs';
+import {auditAdmin,launchAuditBrowser} from './audit-browser-runtime.mjs';
 const require=createRequire(import.meta.url),{chromium}=require(process.env.DEMO_PLAYWRIGHT_MODULE || 'playwright');
 const previewOnly=process.argv.includes('--preview-only');
 const previous=previewOnly?JSON.parse(await readFile(new URL('teacher-browser-results.json',import.meta.url),'utf8')):null;
-const server=localAdmin('demo-digital-no-due',8180,9199),base='http://127.0.0.1:5050',prefix=previous?.prefix || `teacher-browser-${Date.now()}`,scheme=prefix;
+const server=auditAdmin(),base='http://127.0.0.1:5050',prefix=previous?.prefix || `teacher-browser-${Date.now()}`,scheme=prefix;
 const report={prefix,teachers:[],students:[],offerings:[],layouts:[],errors:[]};let browser;
 async function snapshot() {
   const records=new Map();
@@ -34,7 +34,7 @@ async function layout(page,width) {
   assert.equal(metrics.shell,Math.min(width,1040));assert.equal(metrics.left,(width-metrics.shell)/2);assert.equal(metrics.overflow,false);assert.equal(metrics.overlap,false);assert.equal(metrics.tableScroll,true);report.layouts.push(metrics);
 }
 try {
-  const before=await snapshot();browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+  const before=await snapshot();browser=await launchAuditBrowser(chromium,{headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});
   const admin=await login('admin@demo.test');
   if(previewOnly) {
     const teachers=await Promise.all(previous.teachers.map(async teacher=>{const p=(await server.db.doc(`users/${teacher.uid}`).get()).data();return {name:p.name,collegeEmail:p.email,phone:p.phone,department:p.department,employeeId:p.facultyId,role:p.role};}));
