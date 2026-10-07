@@ -1,7 +1,7 @@
 import { db } from "./firebase-config.js";
 import { requireAuth, wireLogout } from "./auth.js";
 import { initThemeToggle } from "./theme.js";
-import { doc, setDoc, writeBatch, serverTimestamp, arrayRemove } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { doc, setDoc, writeBatch, serverTimestamp, arrayRemove } from "./api-store.js";
 import { page, record } from "./academic.js";
 import { escapeHtml as e, errorState, busy } from "./ui.js";
 import { ROLES, SERVICES, stableId, saveAccount, saveOffering, enrollStudent, preparePlan } from "./admin-data.js";

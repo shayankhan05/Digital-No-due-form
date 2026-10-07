@@ -1,0 +1,33 @@
+import {Router} from 'express';
+import {canRead,scopeQuery} from '../services/authorization.js';
+import {matchesStudent,syncStudentWorkflow} from '../services/clearance.js';
+import {syncOfficeSearchIndex} from '../services/office-search.js';
+const forbidden=()=>{throw Object.assign(new Error('This operation is not allowed.'),{code:'permission-denied'});};
+export function validPath(path){if(typeof path!=='string'||!/^([A-Za-z][A-Za-z0-9]*)(\/[A-Za-z0-9_-]{1,200}){0,3}$/.test(path))throw Object.assign(new Error('Invalid data path.'),{code:'invalid-argument'});return path;}
+export const serialize=value=>value instanceof Date?{__date:value.toISOString()}:Array.isArray(value)?value.map(serialize):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,serialize(v)])):value;
+export const values=value=>Array.isArray(value)?value.map(values):value&&typeof value==='object'?value.__type==='timestamp'?new Date():value.__type==='arrayRemove'?{__operation:'arrayRemove',values:value.values}:Object.fromEntries(Object.entries(value).map(([k,v])=>[k,values(v)])):value;
+export async function saveMark(store,actor,id,data){
+  const e=(await store.doc(`enrollments/${id}`).get()).data(),o=e&&(await store.doc(`offerings/${e.offeringId}`).get()).data(),s=e&&(await store.doc(`students/${e.studentId}`).get()).data();
+  if(!e||!o||!s||e.active===false||!matchesStudent(s,o)||actor.role!=='admin'&&(!['subject_faculty','mentor'].includes(actor.role)||o.teacherId!==actor.uid||e.teacherId!==actor.uid))forbidden();
+  const scores=data.scores;if(!scores||typeof scores!=='object'||Array.isArray(scores)||Object.keys(scores).some(k=>!o.components.some(c=>c.id===k)))throw Object.assign(new Error('Invalid assessment.'),{code:'invalid-argument'});
+  for(const c of o.components)if(scores[c.id]!==undefined&&(!Number.isFinite(scores[c.id])||scores[c.id]<0||scores[c.id]>c.max))throw Object.assign(new Error('Marks are outside the assessment range.'),{code:'invalid-argument'});
+  await store.doc(`marks/${id}`).set({studentId:e.studentId,offeringId:e.offeringId,teacherId:o.teacherId,mentorId:e.mentorId,subjectId:o.subjectId,subjectCode:o.subjectCode,semester:o.semester,section:o.section,scores,updatedBy:actor.uid,updatedAt:new Date()});
+}
+async function validateAdmin(store,path,data){
+  const [collection]=path.split('/');if(!['users','students','subjects','offerings','enrollments','assignments','settings'].includes(collection))forbidden();
+  if(/"(password|passwordHash|privateKey)"\s*:/.test(JSON.stringify(data)))throw new Error('Credentials are not application data.');
+  if(collection==='users'&&data.role&&!['admin','student','subject_faculty','mentor','hod','office','library','accounts','physics_lab','chemistry_lab'].includes(data.role))throw new Error('Invalid role.');
+  if(collection==='students'&&!path.includes('/clearance/')){if(data.semester!==undefined&&(!Number.isInteger(Number(data.semester))||Number(data.semester)<1||Number(data.semester)>12))throw new Error('Invalid semester.');if(data.mentorId&&(await store.doc(`users/${data.mentorId}`).get()).data()?.role!=='mentor')throw new Error('Invalid mentor.');}
+  if(collection==='offerings'){const previous=(await store.doc(path).get()).data(),o={...previous,...data};if(!['subject_faculty','mentor'].includes((await store.doc(`users/${o.teacherId}`).get()).data()?.role)||!(await store.doc(`subjects/${o.subjectId}`).get()).exists)throw new Error('Invalid subject/teacher.');if(!Array.isArray(o.components)||!o.components.length||o.components.length>10||new Set(o.components.map(c=>c.id)).size!==o.components.length||o.components.some(c=>!c.id||!c.label||!Number.isFinite(c.max)||c.max<=0))throw new Error('Invalid assessments.');}
+  if(collection==='enrollments'){const s=(await store.doc(`students/${data.studentId}`).get()).data(),o=(await store.doc(`offerings/${data.offeringId}`).get()).data();if(!s||!o||!matchesStudent(s,o)||data.teacherId!==o.teacherId)throw new Error('Invalid enrollment mapping.');}
+}
+export function dataRoutes(store){const router=Router();
+  router.post('/read',async(req,res)=>{const path=validPath(req.body.path),snap=await store.doc(path).get();if(snap.exists&&!await canRead(store,req.actor,path,snap.data()))forbidden();res.json({id:snap.id,exists:snap.exists,data:serialize(snap.data())});});
+  router.post('/query',async(req,res)=>{const path=validPath(req.body.path);let q=store.collection(path);const filters=req.body.filters||[];if(!Array.isArray(filters)||filters.length>8)throw new Error('Invalid filters.');const primitive=v=>v===null||['string','number','boolean'].includes(typeof v);for(const [field,op,value]of filters){if(!/^(__name__|[A-Za-z][A-Za-z0-9]*)$/.test(field)||!['==','in','array-contains'].includes(op)||(op==='in'?(!Array.isArray(value)||value.length>100||!value.every(primitive)):!primitive(value)))throw new Error('Invalid filter.');q=q.where(field,op,value);}q=await scopeQuery(store,req.actor,path,q);for(const [field,dir]of req.body.orders||[['__name__','asc']]){if(!/^(__name__|[A-Za-z][A-Za-z0-9]*)$/.test(field)||!['asc','desc'].includes(dir))throw new Error('Invalid order.');q=q.orderBy(field,dir);}const size=Math.min(100,Math.max(1,Number(req.body.limit)||30));q=q.limit(size);if(req.body.cursor){validPath(path+'/'+req.body.cursor);q=q.startAfter(req.body.cursor);}const snap=await q.get(),rows=[];for(const doc of snap.docs)if(await canRead(store,req.actor,doc.ref.path,doc.data()))rows.push({id:doc.id,data:serialize(doc.data())});res.json({rows,scanned:snap.size,cursor:snap.docs.at(-1)?.id||null,more:snap.size===size});});
+  router.post('/write',async(req,res)=>{const operations=req.body.operations;if(!Array.isArray(operations)||!operations.length||operations.length>400)throw new Error('Invalid write batch.');if(operations.length===1&&/^marks\/[A-Za-z0-9_-]{1,200}$/.test(operations[0].path)){await saveMark(store,req.actor,operations[0].path.split('/')[1],operations[0].data);return res.json({saved:true});}if(req.actor.role!=='admin')forbidden();
+    for(const op of operations){validPath(op.path);if(!['set','update'].includes(op.type))forbidden();await validateAdmin(store,op.path,op.data||{});}
+    await store.runTransaction(async tx=>{for(const op of operations){const data=values(op.data);if(op.type==='update')tx.update(store.doc(op.path),data);else tx.set(store.doc(op.path),data,op.options||{});}});
+    for(const id of new Set(operations.filter(op=>op.path.startsWith('students/')&&!op.path.includes('/clearance/')).map(op=>op.path.split('/')[1])))await syncOfficeSearchIndex(store,id);
+    res.json({saved:true});
+  });return router;
+}

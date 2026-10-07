@@ -1,0 +1,248 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function me() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function role() { return me().role; }
+    function admin() { return signedIn() && role() == 'admin'; }
+    function student(uid) { return get(/databases/$(database)/documents/students/$(uid)).data; }
+    function offering(id) { return get(/databases/$(database)/documents/offerings/$(id)).data; }
+    function sameClass(a, b) {
+      return string(a.semester) == string(b.semester) && a.section.upper() == b.section.upper();
+    }
+    function sameDepartment(a, b) {
+      return a == b || (a.lower() in ['ise', 'information science & engineering', 'information science and engineering']
+        && b.lower() in ['ise', 'information science & engineering', 'information science and engineering']);
+    }
+    function academicRead(d) {
+      return signedIn() && (admin() || d.studentId == request.auth.uid
+        || (role() == 'mentor' && student(d.studentId).mentorId == request.auth.uid)
+        || (role() in ['subject_faculty', 'mentor'] && d.teacherId == request.auth.uid && offering(d.offeringId).teacherId == request.auth.uid));
+    }
+    function requestRead(d) {
+      return signedIn() && (admin() || d.studentId == request.auth.uid
+        || d.get('mentorId', '') == request.auth.uid
+        || (role() == 'hod' && d.get('hodId', '') == request.auth.uid)
+        || (role() == 'office' && d.get('officeId', '') == request.auth.uid)
+        || request.auth.uid in d.get('approverIds', []));
+    }
+    match /users/{uid} {
+      allow read: if signedIn() && (admin() || uid == request.auth.uid || resource.data.role != 'student');
+      allow create, update: if admin() && request.resource.data.role in ['admin','student','subject_faculty','mentor','hod','office','library','physics_lab','chemistry_lab','accounts'];
+      allow delete: if false;
+      match /notifications/{eventId} {
+        allow read: if signedIn() && (uid == request.auth.uid || admin());
+        allow create: if signedIn() && notificationCreate(uid, eventId);
+        allow update, delete: if false;
+      }
+    }
+    function notificationCreate(uid, eventId) {
+      let n = request.resource.data;
+      let before = get(/databases/$(database)/documents/noDueRequests/$(n.requestId)).data;
+      let after = getAfter(/databases/$(database)/documents/noDueRequests/$(n.requestId)).data;
+      return uid == after.studentId && n.studentId == uid && n == after.lastEvent
+        && eventId == n.requestId + '_' + string(n.version)
+        && after.version == before.version + 1 && n.actorId == request.auth.uid;
+    }
+    match /students/{uid} {
+      allow read: if signedIn() && (admin() || uid == request.auth.uid
+        || (role() == 'mentor' && resource.data.mentorId == request.auth.uid)
+        || (role() in ['subject_faculty','mentor'] && request.auth.uid in resource.data.get('teacherIds', [])));
+      allow create, update: if admin();
+      allow delete: if false;
+      match /clearance/{id} {
+        allow read: if signedIn() && (admin() || uid == request.auth.uid);
+        allow create, update: if admin();
+        allow delete: if false;
+      }
+    }
+    match /subjects/{id} {
+      allow read: if signedIn();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+    function offeringRead(id, d) {
+      return signedIn() && (admin() || d.teacherId == request.auth.uid
+        || (role() == 'student' && id in student(request.auth.uid).get('offeringIds', [])
+          && sameClass(d, student(request.auth.uid)))
+        || (role() == 'mentor' && exists(/databases/$(database)/documents/offerings/$(id))));
+    }
+    match /offerings/{id} {
+      allow read: if offeringRead(id, resource.data);
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+    match /enrollments/{id} {
+      allow read: if academicRead(resource.data);
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+    function scoreValid(scores, components, index) {
+      return components.size() <= index || !(components[index].id in scores)
+        || (scores[components[index].id] is number && scores[components[index].id] >= 0 && scores[components[index].id] <= components[index].max);
+    }
+    function marksWrite(id) {
+      let d = request.resource.data;
+      let enrollment = get(/databases/$(database)/documents/enrollments/$(id)).data;
+      let o = offering(enrollment.offeringId);
+      let s = student(enrollment.studentId);
+      return signedIn() && (admin() || (role() in ['subject_faculty','mentor'] && o.teacherId == request.auth.uid && enrollment.teacherId == request.auth.uid))
+        && enrollment.get('active', true) == true
+        && d.keys().hasOnly(['studentId','offeringId','teacherId','mentorId','subjectId','subjectCode','semester','section','scores','updatedBy','updatedAt'])
+        && d.studentId == enrollment.studentId && d.offeringId == enrollment.offeringId
+        && d.teacherId == o.teacherId && d.mentorId == s.mentorId && d.subjectId == o.subjectId && d.subjectCode == o.subjectCode
+        && d.semester == o.semester && d.section == o.section && sameClass(s, o)
+        && (!('department' in o) || o.department == '' || sameDepartment(s.get('department',''), o.department))
+        && (!('scheme' in o) || o.scheme == '' || string(s.get('scheme','')) == string(o.scheme))
+        && d.updatedBy == request.auth.uid && d.updatedAt == request.time
+        && d.scores is map && d.scores.keys().hasOnly(o.componentIds) && o.components.size() <= 10
+        && scoreValid(d.scores,o.components,0) && scoreValid(d.scores,o.components,1)
+        && scoreValid(d.scores,o.components,2) && scoreValid(d.scores,o.components,3)
+        && scoreValid(d.scores,o.components,4) && scoreValid(d.scores,o.components,5)
+        && scoreValid(d.scores,o.components,6) && scoreValid(d.scores,o.components,7)
+        && scoreValid(d.scores,o.components,8) && scoreValid(d.scores,o.components,9);
+    }
+    match /marks/{id} {
+      allow read: if academicRead(resource.data);
+      // Missing marks are a valid empty state; reads still require an authorized enrollment.
+      allow get: if signedIn() && !exists(/databases/$(database)/documents/marks/$(id))
+        && academicRead(get(/databases/$(database)/documents/enrollments/$(id)).data);
+      allow create, update: if marksWrite(id);
+      allow delete: if false;
+    }
+    match /assignments/{id} {
+      allow read: if offeringRead(resource.data.offeringId, offering(resource.data.offeringId));
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+    match /settings/{id} { allow get: if admin() || (signedIn() && id == 'workflow'); allow list, create, update: if admin(); allow delete: if false; }
+    // Trusted provisioning backend owns identity reservations and retry jobs.
+    match /uniqueIdentities/{id} { allow read: if admin(); allow write: if false; }
+    match /provisioningJobs/{id} { allow read: if admin(); allow write: if false; }
+
+    function requestCreate() {
+      let d = request.resource.data;
+      let s = student(request.auth.uid);
+      let p = get(/databases/$(database)/documents/students/$(request.auth.uid)/clearance/plan).data;
+      let c = get(/databases/$(database)/documents/settings/workflow).data;
+      return role() == 'student' && d.keys().hasOnly(['schemaVersion','workflowVersion','studentId','studentName','usn','semester','section','mentorId','hodId','officeId','approverIds','approvalItems','approvalStates','resubmissionStates','remaining','status','mentorApproval','hodApproval','lastApprovalId','version','lastEvent','createdAt'])
+        && p.valid == true && p.semester == s.semester && p.section == s.section && p.mentorId == s.mentorId
+        && p.hodId == c.hodId && p.officeId == c.officeId
+        && p.items.library.approverId == c.library && p.items.accounts.approverId == c.accounts
+        && !p.items.keys().hasAny(['physics_lab','chemistry_lab'])
+        && d.schemaVersion == 2 && d.studentId == request.auth.uid && d.studentName == s.name && d.usn == s.usn
+        && d.get('workflowVersion',2) == p.get('workflowVersion',2)
+        && d.semester == s.semester && d.section == s.section && d.mentorId == p.mentorId && d.hodId == p.hodId && d.officeId == p.officeId
+        && d.approverIds == p.approverIds && d.approvalItems == p.items && d.approvalStates == p.initialStates && d.resubmissionStates == p.initialStates
+        && d.remaining == p.items.size() && d.remaining >= 3 && d.remaining <= 32
+        && d.status == 'pending_stage1' && d.mentorApproval == {'status':'pending','remarks':''} && d.hodApproval == {'status':'pending','remarks':''}
+        && d.lastApprovalId == '' && d.version == 0 && d.lastEvent == null && d.createdAt == request.time;
+    }
+    function changedOnly(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
+    function eventValid(id) {
+      let d = request.resource.data;
+      let n = d.lastEvent;
+      let eventId = id + '_' + string(d.version);
+      return d.version == resource.data.version + 1 && d.updatedAt == request.time
+        && n.keys().hasOnly(['requestId','studentId','actorId','actorName','actorType','subjectCode','reason','status','version','createdAt'])
+        && n.requestId == id && n.studentId == resource.data.studentId && n.actorId == request.auth.uid
+        && n.actorName == me().get('name','') && n.actorType == role() && n.status == d.status && n.version == d.version
+        && n.reason is string && n.reason.size() <= 2000 && n.createdAt == request.time
+        && (d.status != 'rejected' || n.reason.matches('.*[^\\s].*'))
+        && getAfter(/databases/$(database)/documents/users/$(d.studentId)/notifications/$(eventId)).data == n;
+    }
+    function stage1Update(id) {
+      let old = resource.data;
+      let d = request.resource.data;
+      let key = d.lastApprovalId;
+      let item = old.approvalItems[key];
+      let decision = d.approvalStates[key];
+      return changedOnly(['approvalStates','resubmissionStates','remaining','lastApprovalId','status','version','lastEvent','updatedAt'])
+        && old.status == 'pending_stage1' && old.approvalStates[key] == 'pending' && old.remaining > 0
+        && item.approverId == request.auth.uid
+        && item.approverType in ['subject_faculty','library','accounts']
+        && (item.approverType != 'subject_faculty' || subjectOwner(item,old.studentId))
+        && (role() == item.approverType || (item.approverType == 'subject_faculty' && role() == 'mentor'))
+        && d.approvalStates.diff(old.approvalStates).affectedKeys().hasOnly([key])
+        && decision in ['approved','rejected'] && d.lastEvent.subjectCode == item.subjectCode
+        && ((decision == 'approved' && d.resubmissionStates == d.approvalStates)
+          || (decision == 'rejected' && d.resubmissionStates.diff(d.approvalStates).affectedKeys().hasOnly([key]) && d.resubmissionStates[key] == 'pending'))
+        && d.remaining == old.remaining - (decision == 'approved' ? 1 : 0)
+        && d.status == (decision == 'rejected' ? 'rejected' : d.remaining == 0 ? 'pending_mentor' : 'pending_stage1')
+        && (decision != 'approved' || d.lastEvent.reason == '');
+    }
+    function laterUpdate(field, assignedField, requiredRole, stage, next) {
+      let d = request.resource.data;
+      let decision = d[field];
+      return role() == requiredRole && resource.data[assignedField] == request.auth.uid && resource.data.status == stage
+        && changedOnly([field,'status','version','lastEvent','updatedAt']) && decision.status in ['approved','rejected']
+        && decision.keys().hasOnly(['status','remarks','actorId','actedAt']) && decision.actorId == request.auth.uid && decision.actedAt == request.time
+        && decision.remarks == d.lastEvent.reason && d.lastEvent.subjectCode == null
+        && d.status == (decision.status == 'approved' ? next : 'rejected')
+        && (decision.status != 'approved' || d.lastEvent.reason == '');
+    }
+    function resumeUpdate() {
+      let old = resource.data;
+      let d = request.resource.data;
+      let key = d.lastApprovalId;
+      return role() == 'student' && old.studentId == request.auth.uid && old.status == 'rejected' && d.lastEvent.reason == '' && d.lastEvent.subjectCode == null
+        && ((key in old.approvalStates && old.approvalStates[key] == 'rejected'
+          && changedOnly(['approvalStates','lastApprovalId','status','version','lastEvent','updatedAt'])
+          && d.approvalStates == old.resubmissionStates && d.status == 'pending_stage1')
+        || (old.mentorApproval.status == 'rejected' && old.remaining == 0 && d.status == 'pending_mentor'
+          && changedOnly(['mentorApproval','status','version','lastEvent','updatedAt']) && d.mentorApproval == {'status':'pending','remarks':''})
+        || (old.hodApproval.status == 'rejected' && old.remaining == 0 && d.status == 'pending_hod'
+          && changedOnly(['hodApproval','status','version','lastEvent','updatedAt']) && d.hodApproval == {'status':'pending','remarks':''}));
+    }
+    function officeUpdate() {
+      let d = request.resource.data;
+      return role() == 'office' && resource.data.officeId == request.auth.uid && resource.data.status == 'cleared' && d.status == 'issued'
+        && changedOnly(['status','issuedBy','issuedById','issuedAt','version','lastEvent','updatedAt'])
+        && d.issuedById == request.auth.uid && d.issuedBy == me().name && d.issuedAt == request.time && d.lastEvent.reason == '' && d.lastEvent.subjectCode == null;
+    }
+    match /noDueRequests/{id} {
+      allow read: if requestRead(resource.data);
+      allow create: if signedIn() && requestCreate();
+      allow update: if admin() || (signedIn() && resource.data.get('schemaVersion',0) == 2 && eventValid(id)
+        && (stage1Update(id) || laterUpdate('mentorApproval','mentorId','mentor','pending_mentor','pending_hod')
+          || laterUpdate('hodApproval','hodId','hod','pending_hod','cleared') || officeUpdate() || resumeUpdate()));
+      allow delete: if false;
+      match /approvals/{approvalId} {
+        allow read: if signedIn() && (admin() || get(/databases/$(database)/documents/noDueRequests/$(id)).data.studentId == request.auth.uid
+          || role() in ['mentor','hod','office'] && requestRead(get(/databases/$(database)/documents/noDueRequests/$(id)).data)
+          || resource.data.approverId == request.auth.uid && (resource.data.approverType != 'subject_faculty' || subjectOwner(resource.data,resource.data.studentId)));
+        allow create, update: if admin() || (signedIn() && approvalProjection(id, approvalId));
+        allow delete: if false;
+      }
+    }
+    function subjectOwner(item,uid) {
+      let o = offering(item.offeringId);
+      let s = student(uid);
+      let e = get(/databases/$(database)/documents/enrollments/$(item.get('enrollmentId',uid + '__' + item.offeringId))).data;
+      return o.teacherId == request.auth.uid && item.get('teacherUid',item.approverId) == request.auth.uid
+        && e.studentId == uid && e.offeringId == item.offeringId && e.get('active',true) == true
+        && o.get('active',true) == true && sameClass(o,s)
+        && (!('department' in o) || o.department == '' || sameDepartment(o.department,s.get('department','')))
+        && (!('scheme' in o) || o.scheme == '' || string(o.scheme) == string(s.get('scheme','')))
+        && item.subjectCode == o.subjectCode;
+    }
+    function approvalProjection(id, key) {
+      let parent = getAfter(/databases/$(database)/documents/noDueRequests/$(id)).data;
+      let d = request.resource.data;
+      let item = parent.approvalItems[key];
+      return d.keys().hasOnly(['enrollmentId','historicalApproval','approverType','approverId','label','subjectCode','offeringId','studentUid','subjectName','teacherUid','teacherName','teacherEmail','department','scheme','semester','status','remarks','actedBy','actorId','actedAt','studentId','studentName','usn','section','requestId'])
+        && d.get('enrollmentId',null) == item.get('enrollmentId',null)
+        && (!('historicalApproval' in d) || d.historicalApproval == get(/databases/$(database)/documents/noDueRequests/$(id)/approvals/$(key)).data.historicalApproval)
+        && (!('teacherUid' in item) || (d.teacherUid == item.teacherUid && d.teacherName == item.teacherName && d.teacherEmail == item.teacherEmail
+          && d.subjectName == item.subjectName && d.studentUid == item.studentUid && d.department == item.department && d.scheme == item.scheme && d.semester == item.semester))
+        && d.approverType == item.approverType && d.approverId == item.approverId && d.label == item.label && d.subjectCode == item.subjectCode && d.offeringId == item.offeringId
+        && d.studentId == parent.studentId && d.studentName == parent.studentName && d.usn == parent.usn && d.section == parent.section && d.requestId == id
+        && d.status == parent.approvalStates[key]
+        && ((parent.version == 0 && parent.studentId == request.auth.uid && d.status == 'pending' && d.remarks == '' && d.actedBy == null && d.actedAt == null)
+          || (parent.version == get(/databases/$(database)/documents/noDueRequests/$(id)).data.version + 1
+            && (parent.lastApprovalId == key || (role() == 'student' && parent.studentId == request.auth.uid && d.status == 'pending'
+              && get(/databases/$(database)/documents/noDueRequests/$(id)).data.approvalStates[key] == 'rejected'))
+            && parent.lastEvent.actorId == request.auth.uid && d.remarks == parent.lastEvent.reason && d.actorId == request.auth.uid && d.actedBy == me().name && d.actedAt == request.time));
+    }
+  }
+}

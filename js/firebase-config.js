@@ -7,8 +7,6 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import { getAuth, connectAuthEmulator } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
-import { getFirestore, connectFirestoreEmulator } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-import { getFunctions, connectFunctionsEmulator } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-functions.js";
 // https://firebase.google.com/docs/web/setup#available-libraries
 
 // Your web app's Firebase configuration
@@ -32,11 +30,9 @@ const emulatorSession = ["localhost", "127.0.0.1"].includes(location.hostname)
   && sessionStorage.getItem("digitalNoDueEmulator") === "1";
 const app = initializeApp(emulatorSession ? { apiKey: "fake-api-key", authDomain: "demo-digital-no-due.firebaseapp.com", projectId: "demo-digital-no-due", appId: "demo-digital-no-due-local" } : firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const functions = getFunctions(app, "us-central1");
+export const db = Object.freeze({});
+export const functions = Object.freeze({});
 export const isEmulator = emulatorSession;
 if (emulatorSession) {
   connectAuthEmulator(auth, "http://127.0.0.1:9199", { disableWarnings: true });
-  connectFirestoreEmulator(db, "127.0.0.1", 8180);
-  connectFunctionsEmulator(functions, "127.0.0.1", 5001);
 }

@@ -1,0 +1,2 @@
+import {writeFile} from 'node:fs/promises';
+const value=process.argv[2]||process.env.API_BASE_URL;if(!value)throw new Error('Provide the Render HTTPS URL.');const url=new URL(value);if(url.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(url.hostname))throw new Error('HTTPS is required.');await writeFile(new URL('../../js/api-config.js',import.meta.url),`// Public backend URL; contains no credentials.\nexport const API_BASE_URL=${JSON.stringify(url.origin)};\n`);console.log('Frontend API URL configured.');

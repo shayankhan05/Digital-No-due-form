@@ -1,5 +1,5 @@
 import { db } from "./firebase-config.js";
-import { collection, doc, getDoc, getDocs, query, where, limit, orderBy, startAfter, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { collection, doc, getDoc, getDocs, query, where, limit, orderBy, startAfter, setDoc, serverTimestamp } from "./api-store.js";
 import { escapeHtml as e, profileHTML } from "./ui.js";
 
 export async function record(collectionName, id) {
@@ -10,7 +10,7 @@ export async function record(collectionName, id) {
 export async function page(collectionName, filters = [], cursor = null, size = 30) {
   const clauses = filters.map(([key, op, value]) => where(key, op, value));
   const snap = await getDocs(query(collection(db, collectionName), ...clauses, orderBy("__name__"), ...(cursor ? [startAfter(cursor)] : []), limit(size)));
-  return { rows: snap.docs.map(d => ({ ...d.data(), id: d.id })), cursor: snap.docs.at(-1), more: snap.size === size };
+  return { rows: snap.docs.map(d => ({ ...d.data(), id: d.id })), cursor: snap.cursor || snap.docs.at(-1), more: snap.more ?? snap.size === size };
 }
 export async function studentProfile(uid, fallback = {}) {
   return { ...fallback, ...(await record("students", uid) || {}), uid };

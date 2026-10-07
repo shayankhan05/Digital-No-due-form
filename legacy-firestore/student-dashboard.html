@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Digital No-Due — Dashboard</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="manifest" href="manifest.json" />
+</head>
+<body>
+<div class="academic-links"><a href="academic.html">Profile, Subjects, Marks & Assignments</a></div>
+<div class="app-shell">
+
+  <div class="top-bar">
+    <div class="brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e3a5f" stroke-width="1.8"><path d="M12 3 4 6.5V11c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V6.5L12 3Z"/></svg>
+      Digital No-Due
+    </div>
+    <button id="logoutBtn" class="btn-sm">Log out</button>
+  </div>
+
+  <div class="app-content" id="content">
+    <div class="center-state">Loading your dashboard…</div>
+  </div>
+
+  <nav class="bottom-nav">
+    <a href="student-dashboard.html" class="active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      Dashboard
+    </a>
+    <a href="student-dashboard.html">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h4"/></svg>
+      Requests
+    </a>
+    <a href="create-request.html">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
+      New
+    </a>
+   <a href="#profile" id="profileNav">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6"/></svg>
+      Profile
+    </a>
+  </nav>
+</div>
+
+<script type="module" src="js/student.js"></script>
+</body>
+</html>

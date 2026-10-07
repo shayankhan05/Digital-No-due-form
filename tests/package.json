@@ -3,13 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run audit",
-    "emulators": "npm run audit",
+    "test": "npm --prefix ../server test",
+    "emulators": "npm --prefix ../server test",
     "preview": "node start-preview.mjs",
     "seed": "node --loader ./firebase-loader.mjs seed-demo.mjs",
     "verify:demo": "node --loader ./firebase-loader.mjs verify-demo.mjs",
-    "test:all": "node run-audit-tests.mjs",
-    "audit": "firebase emulators:exec --project demo-digital-no-due-audit --only firestore,auth,functions --config ../firebase-audit.json \"npm run test:all\"",
+    "test:all": "npm --prefix ../server test",
+    "audit": "npm --prefix ../server test",
     "seed:bulk": "node seed-bulk.mjs"
   },
   "devDependencies": {

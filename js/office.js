@@ -1,5 +1,5 @@
 import { db, functions } from "./firebase-config.js";
-import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-functions.js";
+import { httpsCallable } from "./api-callable.js";
 import { requireAuth, wireLogout } from "./auth.js";
 import {
   issueHallTicket,
@@ -14,7 +14,7 @@ import {
   query,
   where,
   getDocs, limit, orderBy
-} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+} from "./api-store.js";
 
 
 // ============================================================

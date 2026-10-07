@@ -1,5 +1,5 @@
 import { db } from "./firebase-config.js";
-import { collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { collection, getDocs, query, orderBy, limit } from "./api-store.js";
 import { escapeHtml as e } from "./ui.js";
 import { statusLabel } from "./workflow-model.js";
 export async function loadNotifications(uid) {

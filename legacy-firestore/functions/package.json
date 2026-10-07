@@ -1,0 +1,9 @@
+{
+  "name":"digital-no-due-provisioning",
+  "private":true,
+  "type":"module",
+  "main":"index.js",
+  "engines":{"node":"22"},
+  "scripts":{"check":"node --check index.js && node --check provisioning.js"},
+  "dependencies":{"firebase-admin":"^13.0.0","firebase-functions":"^6.0.0","nodemailer":"^7.0.0"}
+}

@@ -4,7 +4,7 @@ import { academicDetails, academicHTML, page, record, saveMarks } from "./academ
 import { escapeHtml as e, errorState, profileHTML, busy } from "./ui.js";
 import { approvalHTML } from "./student-updates.js";
 import { db } from "./firebase-config.js";
-import { collection, getDocs, query, where, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { collection, getDocs, query, where, orderBy, limit } from "./api-store.js";
 wireLogout(); initThemeToggle();
 const content = document.getElementById("content");
 let actor, cursor, rows = [], classLoadVersion = 0;

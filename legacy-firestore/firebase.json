@@ -1,0 +1,40 @@
+{
+  "functions": [{"source":"functions","codebase":"institutional","ignore":["node_modules","*.log",".env*",".secret*"],"predeploy":["npm --prefix functions run check"]}],
+  "hosting": {
+    "public": ".",
+    "headers": [{ "source": "**", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }],
+    "ignore": [
+      "firebase.json",
+      "firebase-audit.json",
+      "functions/**",
+      "local-emulator-backup/**",
+      "firestore.rules",
+      "README.md",
+      "service-account-key.json",
+      "**/*service-account*.json",
+      "**/*.pem",
+      "**/!(student-import|teacher-import|offering-import|ise-5c-2022-confirmed).csv",
+      "docs/**",
+      "tests/**",
+      "tools/**",
+      "firestore.indexes.json",
+      "**/*.log",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "emulators": {
+    "auth": { "port": 9199 },
+    "firestore": { "port": 8180 },
+    "hosting": { "port": 5050 },
+    "functions": { "port": 5001 },
+    "ui": { "enabled": true, "port": 4500 },
+    "hub": { "port": 4410 },
+    "logging": { "port": 4501 },
+    "singleProjectMode": true
+  }
+}

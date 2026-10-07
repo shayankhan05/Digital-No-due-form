@@ -1,6 +1,6 @@
 import {requireAuth,wireLogout} from './auth.js';
 import {functions,isEmulator} from './firebase-config.js';
-import {httpsCallable} from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-functions.js';
+import {httpsCallable} from "./api-callable.js";
 import {parseCSV} from './csv.js';
 import {page} from './academic.js';
 import {escapeHtml as e,busy,errorState} from './ui.js';

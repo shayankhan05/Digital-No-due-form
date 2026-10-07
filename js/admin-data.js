@@ -1,5 +1,5 @@
 import { db } from "./firebase-config.js";
-import { doc, writeBatch, setDoc, serverTimestamp, arrayRemove } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { doc, writeBatch, setDoc, serverTimestamp, arrayRemove } from "./api-store.js";
 import { page, record } from "./academic.js";
 export const ROLES = ["student", "subject_faculty", "mentor", "hod", "office", "library", "physics_lab", "chemistry_lab", "accounts", "admin"];
 export const SERVICES = ["library", "accounts"];

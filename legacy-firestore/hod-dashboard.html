@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Digital No-Due — Final Approval</title>
+
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="manifest" href="manifest.json" />
+</head>
+
+<body>
+
+<div class="app-shell">
+
+  <!-- TOP BAR -->
+  <div class="top-bar">
+
+    <div id="hodHeader" class="brand">
+      Final approval queue
+    </div>
+
+    <div style="display:flex; align-items:center; gap:10px;">
+
+      <button
+        id="themeToggle"
+        class="btn-sm"
+        type="button"
+        title="Change theme">
+        🌙
+      </button>
+
+      <button
+        id="logoutBtn"
+        class="btn-sm"
+        type="button">
+        Log out
+      </button>
+
+    </div>
+
+  </div>
+
+
+  <!-- MAIN CONTENT -->
+  <div class="app-content" id="content">
+
+    <div class="center-state">
+      Loading HOD dashboard…
+    </div>
+
+  </div>
+
+
+  <!-- BOTTOM NAVIGATION -->
+  <nav class="bottom-nav">
+
+    <!-- DASHBOARD -->
+    <a
+      href="hod-dashboard.html"
+      id="hodDashboardNav"
+      class="active">
+
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8">
+
+        <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+        <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+        <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+        <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+
+      </svg>
+
+      Dashboard
+    </a>
+
+
+    <!-- PROFILE -->
+    <a
+      href="#profile"
+      id="hodProfileNav">
+
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8">
+
+        <circle cx="12" cy="8" r="3.5"/>
+
+        <path d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6"/>
+
+      </svg>
+
+      Profile
+    </a>
+
+  </nav>
+
+</div>
+
+
+<script type="module" src="js/hod.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,1 @@
+export const requireRole=(...roles)=>(req,res,next)=>roles.includes(req.actor.role)?next():res.status(403).json({error:{code:'permission-denied',message:'This action is not allowed for your role.'}});

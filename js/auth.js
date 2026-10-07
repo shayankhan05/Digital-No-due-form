@@ -5,7 +5,7 @@ import {
   onAuthStateChanged,
   sendPasswordResetEmail,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { doc, getDoc } from "./api-store.js";
 
 // Maps a user's role to the dashboard they land on after login.
 const ROLE_HOME = {

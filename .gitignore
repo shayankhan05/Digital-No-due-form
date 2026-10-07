@@ -20,3 +20,14 @@ tests/responsive-baseline.json
 
 # Local audit/output artifacts
 firebase-audit.json
+server/.env
+server/.env.*
+!server/.env.example
+server/.mongo-data/
+server/migration-output/
+server/*.log
+server/test/*-results.json
+server/dependency-audit.json
+server/auth-emulator-backup/
+legacy-firestore/**/.env*
+legacy-firestore/**/.secret*

@@ -9,7 +9,7 @@ import {
   query,
   where,
   getDocs, orderBy, limit, startAfter
-} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+} from "./api-store.js";
 
 import {
   getRequiredApprovers,
