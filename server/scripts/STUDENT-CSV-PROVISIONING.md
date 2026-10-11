@@ -25,6 +25,14 @@ Do not enable this demo-only policy for an ordinary institutional deployment.
 Changing the policy does not alter existing Auth credentials. Configure normal
 college domains and activation delivery for real institutional accounts.
 
+Demo staff imports have a separate explicit policy,
+`demoStaffProvisioningEnabled: true`, scoped to `@demo.test` staff addresses.
+Existing staff profiles missing Authentication are repaired at their existing
+UID only when email, role and employee ID agree. Email/UID collisions, disabled
+accounts and inactive profiles are rejected. Repeated staff imports preserve
+passwords, teaching assignments and history; ordinary institutional addresses
+continue using activation-email delivery.
+
 The CSV import's existing enrollment and workflow builders remain responsible
 for matching active offerings. Repairs retain the student's canonical UID and
 preserve existing enrollments while refreshing the derived mappings.

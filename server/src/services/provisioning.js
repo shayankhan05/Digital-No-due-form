@@ -13,13 +13,13 @@ const fail=(message,code='invalid-argument')=>{throw new HttpsError(code,message
 const email=v=>text(v).toLowerCase();
 const canonicalDepartment=departmentCode;
 const snapshotData=s=>s.exists?{...s.data(),uid:s.id}:null;
-// Existing local demo policy; production may opt in for student demo addresses
-// only. This public demo credential is never persisted in institutional data.
+// Existing local demo policy; production explicitly opts in by account type.
+// This public demo credential is never persisted in institutional data.
 const demoTemporaryPassword='DemoPassword123!';
 export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{throw new Error('Mail delivery is not configured.');}}) {
   // Production demo provisioning is an explicit institution policy, scoped to
-  // student demo addresses. It never switches production Auth to an emulator.
-  const temporaryAccount=(row,p)=>demo || row.role==='student' && email(row.collegeEmail || row.email).endsWith('@demo.test') && p.demoStudentProvisioningEnabled===true;
+  // student or staff demo addresses. It never switches Auth to an emulator.
+  const temporaryAccount=(row,p)=>demo || email(row.collegeEmail || row.email).endsWith('@demo.test') && (row.role==='student'?p.demoStudentProvisioningEnabled===true:p.demoStaffProvisioningEnabled===true);
   async function admin(uid) {
     if(!uid) fail('Sign in as an administrator.','unauthenticated');
     const [profile,user]=await Promise.all([db.doc(`users/${uid}`).get(),auth.getUser(uid)]);
@@ -133,6 +133,16 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
       }
       if(uid){try{const byUid=await auth.getUser(uid);if(email(byUid.email)!==row.collegeEmail)fail('Institutional UID belongs to another Firebase email.','already-exists');if(byUid.disabled)fail('Existing account is disabled. Explicit reactivation is required.');}catch(error){if(error.code!=='auth/user-not-found')throw error;}}
     }
+    if(row.role!=='student') {
+      const found=await db.collection('users').where('email','==',row.collegeEmail).limit(2).get();
+      if(found.size){
+        if(found.size!==1 || uid && uid!==found.docs[0].id)fail('Staff email institutional identity conflict.','already-exists');
+        const profile=found.docs[0].data();
+        if(isInactive(profile)||profile.role!==row.role||text(profile.facultyId).toUpperCase()!==row.facultyId)fail('Existing email belongs to another role or employee ID.','already-exists');
+        uid=found.docs[0].id;row.existingUid=uid;
+        try{const account=await auth.getUser(uid);if(email(account.email)!==row.collegeEmail||account.disabled)fail('Firebase identity is conflicting or disabled.','already-exists');}catch(error){if(error.code!=='auth/user-not-found')throw error;}
+      }
+    }
     if(await duplicate('email',row.collegeEmail,'users',uid)) fail('Duplicate email.','already-exists');
     if(row.role==='student' && await duplicate('usn',row.usn,'students',uid)) fail('Duplicate USN.','already-exists');
     if(row.role!=='student' && await duplicate('facultyId',row.facultyId,'users',uid)) fail('Duplicate faculty ID.','already-exists');
@@ -194,7 +204,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
       }
     }
     const {row}=await validate(safe,{uid:existing?.uid,p});
-    return {row:{name:row.name,collegeEmail:row.collegeEmail,phone:row.phone,department:row.department,employeeId:row.facultyId,role:row.role},uid:existing?.uid,pendingCaller};
+    return {row:{name:row.name,collegeEmail:row.collegeEmail,phone:row.phone,department:row.department,employeeId:row.facultyId,role:row.role},uid:existing?.uid || row.existingUid,authMissing:!existing,pendingCaller};
   }
   async function previewTeachers(inputs) {
     if(!Array.isArray(inputs) || inputs.length<1 || inputs.length>100) fail('Preview 1–100 teacher rows per chunk.');
@@ -221,7 +231,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   }
   async function provisionTeacher(caller,input) {
     const p=await policy(),checked=await validateTeacher(input,p),row=checked.row;
-    if(!checked.uid || checked.pendingCaller) {
+    if(!checked.uid || checked.authMissing || checked.pendingCaller) {
       const result=await provision(checked.pendingCaller || caller,{...row,facultyId:row.employeeId},teacherRequestId(row));
       return {...result,employeeId:row.employeeId,accountUpdated:false};
     }
@@ -309,6 +319,22 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     const {row,warnings}=await validate(input,{uid:old?uid:null,p});
     const digest=hash(JSON.stringify({email:row.collegeEmail,role:row.role,usn:row.usn || '',facultyId:row.facultyId,name:row.name,department:row.department,semester:row.semester || '',section:row.section || '',scheme:row.scheme,mentorId:row.mentorId || '',phone:row.phone}));
     if(old && old.digest!==digest) fail('Retry ID already belongs to another row.','already-exists');
+    if(row.existingUid && row.role!=='student') {
+      const existingUid=row.existingUid,ref=db.doc(`users/${existingUid}`),keys=[['email',row.collegeEmail],['facultyId',row.facultyId],['loginId',row.facultyId]].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
+      await db.runTransaction(async t=>{
+        const profile=(await t.get(ref)).data();
+        if(!profile||isInactive(profile)||profile.role!==row.role||email(profile.email)!==row.collegeEmail||text(profile.facultyId).toUpperCase()!==row.facultyId)fail('Staff identity changed during provisioning.','already-exists');
+        const identities=await Promise.all(keys.map(key=>t.get(key)));
+        if(identities.some(s=>s.exists&&s.data().uid!==existingUid))fail('Institutional identity reservation conflict.','already-exists');
+        identities.forEach((s,i)=>{if(!s.exists)t.create(keys[i],{uid:existingUid,createdAt:stamp()});});
+      });
+      let account,accountCreated=false;
+      try{account=await auth.getUser(existingUid);}catch(error){if(error.code!=='auth/user-not-found')throw error;}
+      if(!account){try{account=await auth.createUser({uid:existingUid,email:row.collegeEmail,displayName:row.name,password:temporaryAccount(row,p)?demoTemporaryPassword:randomBytes(48).toString('base64url'),disabled:false});accountCreated=true;}catch(error){if(!['auth/uid-already-exists','auth/email-already-exists'].includes(error.code))throw error;try{account=await auth.getUser(existingUid);}catch{fail('Firebase identity changed during provisioning.','already-exists');}}}
+      if(email(account.email)!==row.collegeEmail||account.disabled)fail('Firebase identity is conflicting or disabled.','already-exists');
+      if(accountCreated&&temporaryAccount(row,p))await ref.set({mustChangePassword:true,temporaryPasswordIssuedAt:new Date(Date.now()+1)},{merge:true});
+      return {uid:existingUid,email:row.collegeEmail,role:row.role,accountCreated,authRepaired:accountCreated,subjectsMapped:0,warnings,...(accountCreated?await activation(existingUid,p):{activation:'unchanged'})};
+    }
     if(row.existingUid) {
       const student=(await db.doc(`students/${row.existingUid}`).get()).data();
       const existingUid=row.existingUid;
