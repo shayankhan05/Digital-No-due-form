@@ -1,3 +1,4 @@
+import {departmentLabel} from './department.js';
 import { requireAuth, wireLogout } from "./auth.js";
 import { initThemeToggle } from "./theme.js";
 import { academicDetails, academicHTML, page, record, saveMarks } from "./academic.js";
@@ -5,6 +6,7 @@ import { escapeHtml as e, errorState, profileHTML, busy } from "./ui.js";
 import { approvalHTML } from "./student-updates.js";
 import { db } from "./firebase-config.js";
 import { collection, getDocs, query, where, orderBy, limit } from "./api-store.js";
+import {mountMarksCSV} from './marks-csv.js';
 wireLogout(); initThemeToggle();
 const content = document.getElementById("content");
 let actor, cursor, rows = [], classLoadVersion = 0;
@@ -45,11 +47,12 @@ async function showClass(id, append = false) {
   const loaded = await Promise.all(nextRows.map(async enrollment => ({ enrollment, student: await record("students", enrollment.studentId), marks: await record("marks", enrollment.id), requests: (await getDocs(query(collection(db,"noDueRequests"),where("studentId","==",enrollment.studentId),where("approverIds","array-contains",actor.uid),orderBy("createdAt","desc"),limit(1)))).docs.map(d=>d.data()) })));
   if (version !== classLoadVersion) return;
   cursor = result.cursor; rows = nextRows;
-  target.innerHTML = `<div class="card"><h2>${e(offering.subjectName)} · ${e(offering.section)}</h2><h3>Assignments</h3>${assignments.rows.map(a => `<p><strong>${e(a.title)}</strong> · ${e(a.dueDate)}<br>${e(a.description)} · ${e(a.status)}</p>`).join("") || "No assignments."}</div>${loaded.map(({enrollment,student,marks,requests}) => `<form class="card marks-form" data-id="${e(enrollment.id)}"><h3>${e(student?.name)} · ${e(student?.usn)}</h3><p>Semester ${e(offering.semester)} · Section ${e(offering.section)} · ${e(offering.subjectCode)}</p>${(offering.components || []).map(c => `<label>${e(c.label)} / ${e(c.max)}<input name="${e(c.id)}" type="number" min="0" max="${e(c.max)}" step="0.01" value="${e(marks?.scores?.[c.id] ?? "")}"></label>`).join("")}<button class="btn-primary" type="submit">Save marks</button><p class="muted">No-Due: ${e(requests[0]?.status || "Not submitted")}</p></form>`).join("") || '<div class="card">No enrolled students.</div>'}${result.more ? '<button id="more" class="btn-sm">Load more students</button>' : ""}`;
+  target.innerHTML = `<div class="card"><h2>${e(offering.subjectName)} · ${e(offering.section)}</h2><p>${e(departmentLabel(offering.department))}</p><h3>Assignments</h3>${assignments.rows.map(a => `<p><strong>${e(a.title)}</strong> · ${e(a.dueDate)}<br>${e(a.description)} · ${e(a.status)}</p>`).join("") || "No assignments."}</div>${loaded.map(({enrollment,student,marks,requests}) => `<form class="card marks-form" data-id="${e(enrollment.id)}"><h3>${e(student?.name)} · ${e(student?.usn)}</h3><p>Semester ${e(offering.semester)} · Section ${e(offering.section)} · ${e(offering.subjectCode)}</p>${(offering.components || []).map(c => `<label>${e(c.label)} / ${e(c.max)}<input name="${e(c.id)}" type="number" min="0" max="${e(c.max)}" step="0.01" value="${e(marks?.scores?.[c.id] ?? "")}"></label>`).join("")}<button class="btn-primary" type="submit">Save marks</button><p class="muted">No-Due: ${e(requests[0]?.status || "Not submitted")}</p></form>`).join("") || '<div class="card">No enrolled students.</div>'}${result.more ? '<button id="more" class="btn-sm">Load more students</button>' : ""}`;
   target.querySelectorAll(".marks-form").forEach(form => form.onsubmit = event => {
     event.preventDefault(); const enrollment = rows.find(r => r.id === form.dataset.id);
     const scores = Object.fromEntries([...new FormData(form)].filter(([,v]) => v !== "").map(([k,v]) => [k, Number(v)]));
     busy(form.querySelector("button"), async () => { await saveMarks(enrollment, offering, scores, actor.uid); alert("Marks saved."); });
   });
   document.getElementById("more")?.addEventListener("click", event => busy(event.target, () => showClass(id, true)));
+  if(actor.uid===offering.teacherId)await mountMarksCSV(target,offering,()=>showClass(id));
 }

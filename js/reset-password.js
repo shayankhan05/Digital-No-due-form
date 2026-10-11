@@ -1,0 +1,7 @@
+import {auth} from './firebase-config.js';
+import {verifyPasswordResetCode,confirmPasswordReset} from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
+import './password-visibility.js';
+import {initThemeToggle} from './theme.js';
+initThemeToggle();const code=new URLSearchParams(location.search).get('oobCode'),form=document.getElementById('actionPasswordForm'),info=document.getElementById('resetInfo'),status=document.getElementById('actionStatus');
+try{if(!code)throw new Error();await verifyPasswordResetCode(auth,code);info.textContent='Choose a new password for your account.';form.hidden=false;}catch{info.textContent='This password-reset link is invalid or expired. Request a fresh link from Forgot password.';}
+form.onsubmit=async event=>{event.preventDefault();const password=document.getElementById('actionPassword').value;if(password!==document.getElementById('actionConfirm').value){status.textContent='Passwords do not match.';return;}if(password==='DemoPassword123!'){status.textContent='Choose a password different from the temporary password.';return;}const button=form.querySelector('button[type=submit]');button.disabled=true;try{await confirmPasswordReset(auth,code,password);form.reset();form.hidden=true;status.textContent='Password set. Return to login and use your new password.';}catch{status.textContent='Unable to set your password. The link may have expired; request a fresh reset email.';button.disabled=false;}};

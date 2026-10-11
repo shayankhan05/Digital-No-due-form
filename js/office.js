@@ -1,3 +1,4 @@
+import {departmentLabel} from './department.js';
 import { db, functions } from "./firebase-config.js";
 import { httpsCallable } from "./api-callable.js";
 import { requireAuth, wireLogout } from "./auth.js";
@@ -593,7 +594,7 @@ async function searchStudent(append=false) {
     target.innerHTML=`<p id="officeSearchCount">${count} student${count===1?'':'s'} found${result.mode==='name'?' with this name':''}${result.more?' so far':''}</p>
       ${count?officeSearchRows.map(row=>`<article class="card office-search-student" data-student-uid="${escapeHtml(row.uid)}">
         <h3>${escapeHtml(row.name||'Student')}</h3><p>USN: ${escapeHtml(row.usn||'—')}</p>
-        <p>${escapeHtml(row.department||'—')} · Semester ${escapeHtml(row.semester??'—')} · Section ${escapeHtml(row.section||'—')}</p>
+        <p>${escapeHtml(departmentLabel(row.department)||'—')} · Semester ${escapeHtml(row.semester??'—')} · Section ${escapeHtml(row.section||'—')}</p>
         <p>Email: ${escapeHtml(row.email||'—')}</p><p>No-Due: ${escapeHtml(row.status.noDue)}</p><p>Hall Ticket: ${escapeHtml(row.status.hallTicket)}</p>
         ${row.request?`<button type="button" class="btn-primary btn-block office-view-request" data-uid="${escapeHtml(row.uid)}">${row.request.status===STATUS.CLEARED?'View request / Issue Hall Ticket':'View request'}</button>`:''}
       </article>`).join(''):'<div class="center-state">No matching students found in this page.</div>'}
@@ -1035,7 +1036,7 @@ function showProfile() {
 
       ${profileRow(
         "Department",
-        officer?.department ||
+        departmentLabel(officer?.department) ||
         "Administration"
       )}
 

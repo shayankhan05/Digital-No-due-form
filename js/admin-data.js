@@ -1,3 +1,4 @@
+import {departmentCode} from './department.js';
 import { db } from "./firebase-config.js";
 import { doc, writeBatch, setDoc, serverTimestamp, arrayRemove } from "./api-store.js";
 import { page, record } from "./academic.js";
@@ -82,7 +83,7 @@ export async function preparePlan(uid) {
   for (const enrollment of enrollments.rows.filter(e => e.active !== false)) {
     const offering = await record("offerings", enrollment.offeringId);
     if (!offering || offering.active===false || Number(offering.semester)!==Number(student.semester) || String(offering.section).trim().toUpperCase()!==String(student.section).trim().toUpperCase()) continue;
-    const department=v=>['ise','information science & engineering','information science and engineering'].includes(String(v || '').trim().toLowerCase())?'ise':String(v || '').trim().toLowerCase();
+    const department=v=>departmentCode(v).toLowerCase();
     if(offering.department && department(offering.department)!==department(student.department) || offering.scheme && String(offering.scheme).trim()!==String(student.scheme || '').trim()) continue;
     await requireRole(offering.teacherId, ["subject_faculty", "mentor"]);
     offeringIds.push(offering.id); teacherIds.push(offering.teacherId);

@@ -1,3 +1,6 @@
+import {departmentLabel} from './department.js';
+import {createRejectionEditor} from './rejection-editor.js';
+const rejectionEditor = createRejectionEditor(document.getElementById('content'));
 import { db } from "./firebase-config.js";
 import { requireAuth, wireLogout } from "./auth.js";
 import { actOnStage1Item } from "./workflow.js";
@@ -76,7 +79,8 @@ window.addEventListener("pagehide", () => unsubscribeApprovals?.());
 function startApprovalListener(approver) {
   unsubscribeApprovals?.();
 
-  const clauses = [where("approverIds", "array-contains", approver.uid), where("status", "==", "pending_stage1"), limit(queueLimit)];
+  // A rejected Stage-1 sibling does not close the remaining individual approvals.
+  const clauses = [where("approverIds", "array-contains", approver.uid), where("status", "in", ["pending_stage1", "rejected"]), limit(queueLimit)];
 
   const q = query(
     collection(db, "noDueRequests"),
@@ -93,6 +97,7 @@ function startApprovalListener(approver) {
 
       pendingDocs = snap.docs.flatMap(request => {
         const r = request.data();
+        if (r.status === "rejected" && !Object.values(r.approvalStates || {}).includes("rejected")) return [];
         return Object.entries(r.approvalItems || {}).filter(([id, item]) => item.approverId === approver.uid && r.approvalStates[id] === "pending"
           && ["subject_faculty","library","accounts"].includes(item.approverType)
           && (item.approverType!=="subject_faculty" || item.teacherUid===approver.uid && taughtOfferings.has(item.offeringId)))
@@ -115,6 +120,7 @@ function startApprovalListener(approver) {
     (err) => {
 
       console.error(err);
+      if (rejectionEditor.preserveError()) return;
 
       content.innerHTML = `
         <div class="center-state">
@@ -258,6 +264,7 @@ function setActiveNav(page) {
 // ============================================================
 
 function showDashboard() {
+  if (rejectionEditor.defer(showDashboard)) return;
 
   if (!currentApprover) return;
 
@@ -430,6 +437,7 @@ function showDashboard() {
 // ============================================================
 
 function showRequests() {
+  if (rejectionEditor.defer(showRequests)) return;
 
   if (!currentApprover) return;
 
@@ -592,6 +600,8 @@ function showProfile() {
         email
       )}
 
+
+      ${detailRow("Department", departmentLabel(currentApprover?.department) || "Not available")}
 
       ${detailRow(
         "Role",
@@ -846,144 +856,11 @@ function wireRowActions(approver) {
   // REJECT
   // ----------------------------
 
-  document
-    .querySelectorAll(".reject-btn")
-    .forEach((button) => {
+  rejectionEditor.bind('[data-path]', row => row.dataset.path + ':' + approver.uid, (row, reason) => {
+    const [,requestId,,approvalId] = row.dataset.path.split('/');
+    return actOnStage1Item(requestId, approvalId, 'rejected', reason, approver.name || approver.email);
+  });
 
-      button.addEventListener(
-        "click",
-        async () => {
-
-          const row =
-            button.closest(".row");
-
-          if (!row) {
-            return;
-          }
-
-
-          const path =
-            row.dataset.path;
-
-
-          if (!path) {
-
-            console.error(
-              "Approval path missing."
-            );
-
-            alert(
-              "Could not find this approval."
-            );
-
-            return;
-          }
-
-
-          // Expected:
-          // noDueRequests/REQUEST_ID/approvals/APPROVAL_ID
-
-          const parts =
-            path.split("/");
-
-
-          if (
-            parts.length < 4 ||
-            parts[0] !== "noDueRequests" ||
-            parts[2] !== "approvals"
-          ) {
-
-            console.error(
-              "Invalid approval path:",
-              path
-            );
-
-            alert(
-              "Invalid approval path."
-            );
-
-            return;
-          }
-
-
-          const requestId =
-            parts[1];
-
-          const approvalId =
-            parts[3];
-
-
-          let reasonInput = row.querySelector("textarea");
-          if (!reasonInput) {
-            row.style.flexWrap = "wrap";
-            reasonInput = document.createElement("textarea");
-            reasonInput.placeholder = "Enter reason for rejection";
-            reasonInput.setAttribute("aria-label", "Reason for rejection");
-            reasonInput.maxLength = 2000;
-            reasonInput.style.width = "100%";
-            row.append(reasonInput);
-            button.textContent = "Confirm rejection";
-            reasonInput.focus();
-            return;
-          }
-          const remarks = reasonInput.value;
-
-
-          if (!remarks.trim()) {
-
-            alert(
-              "Please enter a reason for rejection."
-            );
-
-            return;
-          }
-
-
-          try {
-
-            button.disabled = true;
-
-            button.textContent =
-              "Rejecting...";
-
-
-            await actOnStage1Item(
-              requestId,
-              approvalId,
-              "rejected",
-              remarks.trim(),
-              approver.name ||
-                approver.email ||
-                "Approver"
-            );
-
-
-            // Firestore listener refreshes UI.
-
-          }
-
-          catch (error) {
-
-            console.error(
-              "Rejection error:",
-              error
-            );
-
-
-            alert(
-              "Could not reject request: " +
-              error.message
-            );
-
-
-            button.disabled = false;
-
-            button.textContent =
-              "Reject";
-          }
-        }
-      );
-    });
 }
 
 

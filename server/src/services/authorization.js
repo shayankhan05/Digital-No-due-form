@@ -1,7 +1,7 @@
 import {matchesStudent} from './clearance.js';
 export async function canRead(store,actor,path,data){
   if(actor.role==='admin')return true;const [collection,id,child]=path.split('/'),uid=actor.uid,role=actor.role;
-  if(collection==='users')return child==='notifications'?id===uid:id===uid||data.role!=='student';
+  if(collection==='users')return child==='notifications'?id===uid:id===uid||['student','subject_faculty','mentor'].includes(role)&&data.role!=='student';
   if(collection==='students'){if(child==='clearance')return id===uid;if(id===uid)return true;if(role==='mentor'&&data.mentorId===uid)return true;if(['subject_faculty','mentor'].includes(role)){const enrollment=await store.collection('enrollments').where('studentId','==',id).where('teacherId','==',uid).where('active','==',true).get();for(const e of enrollment.docs){const offering=(await store.doc(`offerings/${e.data().offeringId}`).get()).data();if(offering&&offering.teacherId===uid&&matchesStudent(data,offering))return true;}}return false;}
   if(collection==='settings')return role==='student'&&id==='workflow';
   if(collection==='subjects')return true;
@@ -13,6 +13,7 @@ export async function canRead(store,actor,path,data){
   return false;
 }
 export async function scopeQuery(store,actor,path,query){
+  if(['users','students','enrollments'].includes(path))query=query.where('accountStatus','not-in',['inactive','deleted','deactivating']);
   if(actor.role==='admin')return query;const [collection,id,child]=path.split('/'),uid=actor.uid,role=actor.role;
   if(child){if(collection==='users'&&child==='notifications'&&id===uid)return query;if(collection==='noDueRequests'&&child==='approvals'&&await canRead(store,actor,`noDueRequests/${id}`,(await store.doc(`noDueRequests/${id}`).get()).data()))return query;throw Object.assign(new Error('Forbidden collection.'),{code:'permission-denied'});}
   if(collection==='noDueRequests')return query.where(role==='student'?'studentId':role==='mentor'?'mentorId':role==='hod'?'hodId':role==='office'?'officeId':'approverIds', ['student','mentor','hod','office'].includes(role)?'==':'array-contains',uid);
@@ -20,6 +21,7 @@ export async function scopeQuery(store,actor,path,query){
   if(collection==='students'){if(role==='mentor')return query.where('mentorId','==',uid);if(['subject_faculty'].includes(role))return query.where('teacherIds','array-contains',uid);if(role==='student')return query.where('__name__','==',uid);}
   if(collection==='offerings'){if(['subject_faculty','mentor'].includes(role))return query.where('teacherId','==',uid);if(role==='student'){const s=(await store.doc(`students/${uid}`).get()).data();return query.where('__name__','in',s?.offeringIds||[]);}}
   if(['enrollments','marks'].includes(collection)){if(role==='student')return query.where('studentId','==',uid);if(['subject_faculty','mentor'].includes(role))return query.where(role==='mentor'&&!query.filters.some(([field,op,value])=>field==='teacherId'&&op==='=='&&value===uid)?'mentorId':'teacherId','==',uid);}
+  if(collection==='users'&&['office','hod','library','accounts','physics_lab','chemistry_lab'].includes(role))return query.where('__name__','==',uid);
   if(['subjects','assignments','users'].includes(collection))return query;
   throw Object.assign(new Error('Forbidden collection.'),{code:'permission-denied'});
 }

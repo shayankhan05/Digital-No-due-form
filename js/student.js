@@ -914,7 +914,7 @@ function wireResubmit(request) {
         "Resubmitting...";
 
 
-      await resubmit(request.id);
+      await resubmit(request.id, request.version || 0);
 
       await loadRequests();
 

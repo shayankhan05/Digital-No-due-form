@@ -1,10 +1,12 @@
+import {departmentCode} from '../../../js/department.js';
+import {isInactive} from './account-removal.js';
 import {FieldValue} from './values.js';
 
 export const REQUIRED_SERVICES=['library','accounts'];
 const text=v=>String(v ?? '').trim();
-const department=v=>['ise','information science & engineering','information science and engineering'].includes(text(v).toLowerCase())?'ise':text(v).toLowerCase();
+const department=v=>departmentCode(v).toLowerCase();
 export function matchesStudent(student,offering) {
-  return offering.active!==false && Number(offering.semester)===Number(student.semester)
+  return !isInactive(student) && offering.active!==false && Number(offering.semester)===Number(student.semester)
     && text(offering.section).toUpperCase()===text(student.section).toUpperCase()
     && (!text(offering.department) || department(offering.department)===department(student.department))
     && (!text(offering.scheme) || text(offering.scheme)===text(student.scheme));
@@ -26,7 +28,9 @@ export async function enrollmentPlan(db,uid) {
     if(!snap.exists || !matchesStudent(student,o)) continue;
     const teacher=(await db.doc(`users/${o.teacherId}`).get()).data();
     if(!teacher || !['subject_faculty','mentor'].includes(teacher.role) || e.teacherId!==o.teacherId) throw new Error('An enrolled subject has an invalid teacher mapping. Ask the administrator to refresh it.');
-    items[`subject_${o.id}`]={...subjectItem(uid,student,o,teacher),enrollmentId:row.id};
+    const identity=[String(o.subjectCode).trim().toUpperCase(),o.teacherId,Number(o.semester),text(o.section).toUpperCase(),department(o.department||student.department),text(o.scheme||student.scheme)].join('|');
+    if(Object.values(items).some(i=>i.subjectIdentity===identity))continue;
+    items[`subject_${o.id}`]={...subjectItem(uid,student,o,teacher),subjectIdentity:identity,enrollmentId:row.id};
   }
   const count=Object.keys(items).length;
   if(!count || count>30) throw new Error('Assign 1–30 active subjects matching the student academic context.');

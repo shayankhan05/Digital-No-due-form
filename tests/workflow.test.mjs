@@ -18,6 +18,15 @@ test('mentor and HOD rejections resume their own stage', () => {
   assert.equal(resumeChange({status:'rejected',approvalStates:{},mentorApproval:{status:'rejected'},hodApproval:{status:'pending'}}).status,'pending_mentor');
   assert.equal(resumeChange({status:'rejected',approvalStates:{},mentorApproval:{status:'approved'},hodApproval:{status:'rejected'}}).status,'pending_hod');
 });
+
+test('a Stage-1 rejection leaves pending siblings actionable without clearing the rejection', () => {
+  let r={status:'pending_stage1',remaining:4,approvalStates:{a:'pending',b:'pending',library:'pending',accounts:'approved'}};
+  r={...r,...stage1Change(r,'a','rejected')};assert.equal(r.approvalStates.b,'pending');assert.equal(r.status,'rejected');
+  r={...r,...stage1Change(r,'b','approved')};r={...r,...stage1Change(r,'library','approved')};assert.equal(r.status,'rejected');assert.equal(r.remaining,1);
+  r={...r,...resumeChange(r)};assert.equal(r.approvalStates.a,'pending');assert.equal(r.approvalStates.b,'approved');
+  r={...r,...stage1Change(r,'a','approved')};assert.equal(r.status,'pending_mentor');
+  assert.throws(()=>stage1Change({...r,status:'rejected',approvalStates:{a:'pending'}},'a','approved'));
+});
 test('CSV supports quoted commas, quotes and multiline values; requires Auth UID', () => {
   const rows=parseCSV('uid,name,usn,email,semester,section,mentorId\r\ns1,"Doe, Jane",USN,jane@test.com,6,C,m1'); assert.equal(rows[0].name,'Doe, Jane');
   assert.throws(()=>parseCSV('name,usn\nJane,USN'));

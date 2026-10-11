@@ -1,3 +1,6 @@
+import {departmentLabel} from './department.js';
+import {createRejectionEditor} from './rejection-editor.js';
+const rejectionEditor = createRejectionEditor(document.getElementById('content'));
 import { db } from "./firebase-config.js";
 import { requireAuth, wireLogout } from "./auth.js";
 import { actAsMentor, STATUS } from "./workflow.js";
@@ -173,6 +176,7 @@ function setActiveNav(page) {
 ========================================================= */
 
 function showDashboard() {
+  if (rejectionEditor.defer(showDashboard)) return;
 
   if (!currentMentor) return;
 
@@ -431,75 +435,7 @@ function wireRequestActions() {
     });
 
 
-  content
-    .querySelectorAll(".reject-btn")
-    .forEach((button) => {
-
-      button.addEventListener("click", async (event) => {
-
-        const card =
-          event.target.closest("[data-request-id]");
-
-        if (!card) return;
-
-        const fields =
-          card.querySelector(".reject-fields");
-
-        if (fields.classList.contains("hidden")) {
-
-          fields.classList.remove("hidden");
-
-          button.textContent =
-            "Confirm rejection";
-
-          return;
-        }
-
-
-        const textarea =
-          fields.querySelector("textarea");
-
-        const reason =
-          textarea.value.trim();
-
-
-        if (!reason) {
-
-          alert(
-            "Please enter a reason for rejection."
-          );
-
-          return;
-        }
-
-
-        button.disabled = true;
-
-
-        try {
-
-          await actAsMentor(
-            card.dataset.requestId,
-            "rejected",
-            reason
-          );
-
-        } catch (error) {
-
-          console.error(error);
-
-          alert(
-            "Could not reject request: " +
-            error.message
-          );
-
-          button.disabled = false;
-
-        }
-
-      });
-
-    });
+  rejectionEditor.bind('[data-request-id]', row => row.dataset.requestId + ':mentor:' + currentMentor.uid, (row, reason) => actAsMentor(row.dataset.requestId, 'rejected', reason));
 
 }
 
@@ -946,6 +882,8 @@ function showProfile() {
         mentorEmail
       )}
 
+
+      ${profileRow("Department", departmentLabel(currentMentor?.department) || "Not available")}
 
       ${profileRow(
         "Role",

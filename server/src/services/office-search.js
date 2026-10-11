@@ -1,7 +1,9 @@
+import {departmentCode} from '../../../js/department.js';
+import {isInactive} from './account-removal.js';
 // Derived search documents only; no student, marks or workflow writes.
 import {isDeepStrictEqual} from 'node:util';
 export const normalizeSearch=value=>String(value??'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,' ').toLowerCase();
-const department=value=>['ise','information science & engineering','information science and engineering'].includes(normalizeSearch(value))?'ise':normalizeSearch(value);
+const department=value=>departmentCode(value).toLowerCase();
 export function officeSearchDocument(uid,student){
   const name=normalizeSearch(student.name).slice(0,200),keys=new Set();
   for(let length=1;length<=3;length++)for(let i=0;i<=name.length-length;i++)keys.add(name.slice(i,i+length));
@@ -12,7 +14,7 @@ export async function syncOfficeSearchIndex(db,uid){
   const ref=db.doc(`officeStudentSearch/${uid}`);
   await db.runTransaction(async transaction=>{
     const [student,index]=await Promise.all([transaction.get(db.doc(`students/${uid}`)),transaction.get(ref)]);
-    if(!student.exists){if(index.exists)transaction.delete(ref);return;}
+    if(!student.exists||isInactive(student.data())){if(index.exists)transaction.delete(ref);return;}
     const next=officeSearchDocument(uid,student.data());
     if(!index.exists||!isDeepStrictEqual(index.data(),next))transaction.set(ref,next);
   });

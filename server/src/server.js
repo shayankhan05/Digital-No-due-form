@@ -7,3 +7,4 @@ const origins=(process.env.FRONTEND_ORIGIN||'').split(',').map(v=>v.trim()).filt
 const {app}=createApp({database,client,auth,demo,origins,smtpPassword:process.env.SMTP_PASSWORD,firebaseWebApiKey:process.env.FIREBASE_WEB_API_KEY}),port=Number(process.env.PORT||3000);
 const server=app.listen(port,()=>console.log(`Digital No-Due API listening on ${port}`));
 for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>server.close(async()=>{await client.close();process.exit(0);}));
+process.on('message',message=>{if(message==='shutdown')server.close(async()=>{await client.close();process.exit(0);});});

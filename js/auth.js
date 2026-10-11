@@ -6,6 +6,10 @@ import {
   sendPasswordResetEmail,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import { doc, getDoc } from "./api-store.js";
+import {publicPost,post} from './api.js';
+import './password-visibility.js';
+import './responsive-layout.js';
+import {showPasswordReminder,reminderKey} from './password-reminder.js';
 
 // Maps a user's role to the dashboard they land on after login.
 const ROLE_HOME = {
@@ -33,7 +37,7 @@ export async function getCurrentUserProfile() {
  * Call this at the top of every page except login.html.
  * Redirects to login if signed out. Resolves with the user's profile once ready.
  */
-export function requireAuth(roles = null) {
+export function requireAuth(roles = null,{allowPasswordChange=false}={}) {
   return new Promise((resolve, reject) => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       unsubscribe();
@@ -54,6 +58,7 @@ export function requireAuth(roles = null) {
         return;
       }
       resolve(profile);
+      if (!allowPasswordChange) showPasswordReminder(profile);
       } catch (error) { reject(error); }
     });
   });
@@ -94,9 +99,11 @@ export function wireLoginForm() {
     submitBtn.textContent = "Logging in...";
 
     try {
-    await signInWithEmailAndPassword(auth, email, password);
+    const resolved=await publicPost('/api/auth/login',{identifier:email,password});
+    await signInWithEmailAndPassword(auth, resolved.email, password);
 
-const profile = await getCurrentUserProfile();
+let profile = await getCurrentUserProfile();
+if(profile?.mustChangePassword){try{await post('/api/auth/password-complete',{});profile=await getCurrentUserProfile();}catch{/* Firebase proof is required; otherwise retain the reminder flag. */}}
 
 if (!profile) {
   const error = new Error(PROFILE_ERROR); error.code = "institution/profile-missing"; throw error;
@@ -108,10 +115,11 @@ if (!home) {
   const error = new Error(PROFILE_ERROR); error.code = "institution/profile-missing"; throw error;
 }
 
+sessionStorage.removeItem(reminderKey(profile.uid));
 window.location.href = home;
     } catch (err) {
       if (err.code === "institution/profile-missing") await signOut(auth);
-      errorEl.textContent = err.code === "institution/profile-missing" ? PROFILE_ERROR : friendlyAuthError(err.code);
+      errorEl.textContent = err.code === "institution/profile-missing" ? PROFILE_ERROR : ['unauthenticated','too-many-requests'].includes(err.code)?err.message:friendlyAuthError(err.code);
       errorEl.classList.remove("hidden");
       submitBtn.disabled = false;
       submitBtn.textContent = "Log in";
@@ -122,7 +130,7 @@ window.location.href = home;
 export function wireForgotPassword() {
   const button = document.getElementById("forgotPasswordBtn"), form = document.getElementById("resetForm");
   if (!button || !form) return;
-  button.onclick = () => { form.hidden = false; document.getElementById("resetEmail").value = document.getElementById("email").value.trim(); document.getElementById("resetEmail").focus(); };
+  button.onclick = () => { form.hidden = false; const value=document.getElementById("email").value.trim();document.getElementById("resetEmail").value = value.includes('@')?value:''; document.getElementById("resetEmail").focus(); };
   form.onsubmit = async event => {
     event.preventDefault(); const submit = form.querySelector("button[type=submit]"), status = document.getElementById("resetStatus");
     submit.disabled = true;

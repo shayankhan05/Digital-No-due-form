@@ -1,3 +1,4 @@
+import {departmentLabel} from './department.js';
 import { db } from "./firebase-config.js";
 import { requireAuth, wireLogout } from "./auth.js";
 import { initThemeToggle } from "./theme.js";
@@ -57,7 +58,7 @@ async function render() {
 async function edit(row) {
   if (selected === "users" && row.role === "student") row = {...row, ...(await record("students",row.id))};
   const form = document.getElementById("recordForm");
-  for (const key of fields[selected]) if (form.elements[key]) form.elements[key].value = row[key] ?? (key === "uid" ? row.id : "");
+  for (const key of fields[selected]) if (form.elements[key]) form.elements[key].value = (key==='department'?departmentLabel(row[key]):row[key]) ?? (key === "uid" ? row.id : "");
   if (selected === "offerings") form.elements.components.value = (row.components || []).map(c => `${c.id}, ${c.label}, ${c.max}`).join("\n");
 }
 async function loadList(append = false) {

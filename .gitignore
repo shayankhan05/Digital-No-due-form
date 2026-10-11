@@ -29,5 +29,8 @@ server/*.log
 server/test/*-results.json
 server/dependency-audit.json
 server/auth-emulator-backup/
+server/legacy-running-backup/
+server/test/current-preservation-*.json
+server/test/browser-artifacts/
 legacy-firestore/**/.env*
 legacy-firestore/**/.secret*

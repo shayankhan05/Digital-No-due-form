@@ -1,3 +1,6 @@
+import {departmentLabel} from './department.js';
+import {createRejectionEditor} from './rejection-editor.js';
+const rejectionEditor = createRejectionEditor(document.getElementById('content'));
 import { db } from "./firebase-config.js";
 import { requireAuth, wireLogout } from "./auth.js";
 import { actAsHod, STATUS } from "./workflow.js";
@@ -96,6 +99,7 @@ function startHodListener() {
     (error) => {
 
       console.error(error);
+      if (rejectionEditor.preserveError()) return;
 
       content.innerHTML = `
 
@@ -234,6 +238,7 @@ function setActiveNav(page) {
 // ============================================================
 
 function showDashboard() {
+  if (rejectionEditor.defer(showDashboard)) return;
 
   if (!currentHod) return;
 
@@ -405,6 +410,8 @@ function showProfile() {
         email
       )}
 
+
+      ${detailRow("Department", departmentLabel(currentHod?.department) || "Not available")}
 
       ${detailRow(
         "Role",
@@ -621,6 +628,7 @@ function wireActions() {
           catch (error) {
 
             console.error(error);
+      if (rejectionEditor.preserveError()) return;
 
             alert(
               "Could not approve request: " +
@@ -640,101 +648,7 @@ function wireActions() {
 
 
   // REJECT
-  content
-    .querySelectorAll(".reject-btn")
-    .forEach((btn) => {
-
-
-      btn.addEventListener(
-        "click",
-
-        async (event) => {
-
-
-          const row =
-            event.target.closest(".row");
-
-
-          if (!row) return;
-
-
-          const fields =
-            row.querySelector(
-              ".reject-fields"
-            );
-
-
-          // First click = show reason box
-          if (
-            fields.classList.contains(
-              "hidden"
-            )
-          ) {
-
-            fields.classList.remove(
-              "hidden"
-            );
-
-            btn.textContent =
-              "Confirm rejection";
-
-            return;
-
-          }
-
-
-          const textarea =
-            fields.querySelector(
-              "textarea"
-            );
-
-
-          const reason =
-            textarea.value.trim();
-
-
-          if (!reason) {
-
-            alert(
-              "A reason is required."
-            );
-
-            return;
-
-          }
-
-
-          btn.disabled = true;
-
-
-          try {
-
-            await actAsHod(
-              row.dataset.requestId,
-              "rejected",
-              reason
-            );
-
-          }
-
-          catch (error) {
-
-            console.error(error);
-
-            alert(
-              "Could not reject request: " +
-              error.message
-            );
-
-            btn.disabled = false;
-
-          }
-
-        }
-
-      );
-
-    });
+  rejectionEditor.bind('[data-request-id]', row => row.dataset.requestId + ':hod:' + currentHod.uid, (row, reason) => actAsHod(row.dataset.requestId, 'rejected', reason));
 
 }
 

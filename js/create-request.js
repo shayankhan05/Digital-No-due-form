@@ -3,12 +3,17 @@ import { initThemeToggle } from "./theme.js";
 import { submitRequest, getRequiredApprovers } from "./workflow.js";
 import { studentProfile } from "./academic.js";
 import { escapeHtml as e, errorState } from "./ui.js";
+import {db} from './firebase-config.js';
+import {collection,query,where,limit,getDocs} from './api-store.js';
 initThemeToggle();
 
 const content = document.getElementById("content");
 
 requireAuth(["student"]).then(async (profile) => {
   const student = await studentProfile(profile.uid, profile);
+  const active=await getDocs(query(collection(db,'noDueRequests'),where('studentId','==',profile.uid),where('status','in',['pending_stage1','pending_mentor','pending_hod','pending_office','cleared','rejected']),limit(1)));
+  if(!active.empty){content.innerHTML='<div class="card"><h2>Your existing No-Due request</h2><p>You already have an active No-Due request. Please complete or resolve the existing request before creating another.</p><a class="btn-sm" href="student-dashboard.html#requests">View request and status</a></div>';return;}
+  const keyName='noDueSubmitKey:'+profile.uid;let requestKey=sessionStorage.getItem(keyName);if(!requestKey){requestKey=crypto.randomUUID();sessionStorage.setItem(keyName,requestKey);}
   const required = await getRequiredApprovers(profile.uid);
   const chips = required.map((r) => `<span class="badge badge-locked" style="margin:0 6px 6px 0; display:inline-block;">${e(r.subjectCode || '')} ${e(r.label)}${r.teacherName ? ` — ${e(r.teacherName)}`:''}</span>`).join("");
 
@@ -44,12 +49,12 @@ requireAuth(["student"]).then(async (profile) => {
     submitBtn.disabled = true;
     submitBtn.textContent = "Submitting…";
     try {
-      await submitRequest(student);
+      await submitRequest(student,requestKey);sessionStorage.removeItem(keyName);
       window.location.href = "student-dashboard.html";
     } catch (err) {
       document.getElementById("submitError").textContent = err.message;
       document.getElementById("submitError").classList.remove("hidden");
-      submitBtn.disabled = false;
+      submitBtn.disabled = err.code==='already-exists';
       submitBtn.textContent = "Submit request";
     }
   });

@@ -1,9 +1,10 @@
 export const STATUS = { PENDING_STAGE1: "pending_stage1", PENDING_MENTOR: "pending_mentor", PENDING_HOD: "pending_hod", CLEARED: "cleared", REJECTED: "rejected", ISSUED: "issued" };
 export function stage1Change(r, id, decision) {
-  if (r.status !== STATUS.PENDING_STAGE1 || r.approvalStates[id] !== "pending" || !["approved", "rejected"].includes(decision)) throw new Error("This item is no longer pending at Stage 1.");
-  const remaining = r.remaining - (decision === "approved" ? 1 : 0);
+  const stage1Open = r.status === STATUS.PENDING_STAGE1 || r.status === STATUS.REJECTED && Object.values(r.approvalStates).includes("rejected");
+  if (!stage1Open || r.approvalStates[id] !== "pending" || !["approved", "rejected"].includes(decision)) throw new Error("This item is no longer pending at Stage 1.");
   const approvalStates = { ...r.approvalStates, [id]: decision };
-  return { approvalStates, resubmissionStates: {...approvalStates, [id]: decision === "rejected" ? "pending" : decision}, remaining, lastApprovalId: id, status: decision === "rejected" ? STATUS.REJECTED : remaining === 0 ? STATUS.PENDING_MENTOR : STATUS.PENDING_STAGE1 };
+  const remaining = Object.values(approvalStates).filter(state => state !== "approved").length;
+  return { approvalStates, resubmissionStates: Object.fromEntries(Object.entries(approvalStates).map(([key,state]) => [key,state === "rejected" ? "pending" : state])), remaining, lastApprovalId: id, status: Object.values(approvalStates).includes("rejected") ? STATUS.REJECTED : remaining === 0 ? STATUS.PENDING_MENTOR : STATUS.PENDING_STAGE1 };
 }
 export function resumeChange(r) {
   if (r.status !== STATUS.REJECTED) throw new Error("Only a rejected request can be resubmitted.");

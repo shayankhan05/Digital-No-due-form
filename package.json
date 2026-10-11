@@ -1,0 +1,1 @@
+{"name":"digital-no-due-local","private":true,"type":"module","scripts":{"local":"node server/scripts/local.mjs","seed":"node server/scripts/seed-local.mjs","test":"npm --prefix server test"}}
