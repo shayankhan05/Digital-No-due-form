@@ -33,8 +33,6 @@ let requiredApprovers = [];
 let requestCursor = null;
 let moreRequests = false;
 
-let PROFILE_PHOTO_KEY = "digitalNoDueStudentPhoto";
-
 
 /* =========================================================
    AUTHENTICATION
@@ -49,7 +47,6 @@ requireAuth()
     }
 
     currentStudent = await studentProfile(student.uid, student);
-    PROFILE_PHOTO_KEY = `digitalNoDueStudentPhoto:${student.uid}`;
     try { requiredApprovers = await getRequiredApprovers(student.uid); } catch { requiredApprovers = []; }
 
     await loadRequests();
@@ -233,10 +230,6 @@ function showDashboard() {
       ? studentRequests[0]
       : null;
 
-  const photo =
-    localStorage.getItem(PROFILE_PHOTO_KEY);
-
-
   content.innerHTML = `
 
     <div class="card profile-summary-card">
@@ -245,11 +238,7 @@ function showDashboard() {
 
         <div class="profile-avatar">
 
-          ${
-            photo
-              ? `<img src="${photo}" alt="Profile photo">`
-              : escapeHtml(getInitials(student.name))
-          }
+          ${escapeHtml(getInitials(student.name))}
 
         </div>
 
@@ -507,9 +496,6 @@ function showProfile() {
 
   const student = currentStudent;
 
-  const photo =
-    localStorage.getItem(PROFILE_PHOTO_KEY);
-
   const email =
     student.email ||
     auth.currentUser?.email ||
@@ -526,11 +512,7 @@ function showProfile() {
           class="profile-photo-large"
           id="profilePhotoDisplay">
 
-          ${
-            photo
-              ? `<img src="${photo}" alt="Profile photo">`
-              : escapeHtml(getInitials(student.name))
-          }
+          ${escapeHtml(getInitials(student.name))}
 
         </div>
 
@@ -544,31 +526,7 @@ function showProfile() {
         </p>
 
 
-        <div class="photo-actions">
 
-          <button
-            type="button"
-            class="photo-upload"
-            id="uploadPhotoBtn">
-            Upload Photo
-          </button>
-
-          <button
-            type="button"
-            class="photo-remove"
-            id="removePhotoBtn">
-            Remove Photo
-          </button>
-
-        </div>
-
-
-        <input
-          type="file"
-          id="profilePhotoInput"
-          accept="image/png,image/jpeg,image/webp"
-          hidden
-        >
 
       </div>
 
@@ -651,106 +609,10 @@ function showProfile() {
   `;
 
 
-  setupPhotoControls();
   const academic = document.createElement("div");
   academic.innerHTML = '<div class="card">Loading academic information…</div>';
   content.append(academic);
   academicDetails(currentStudent.uid).then(details => { academic.innerHTML = academicHTML(details); }).catch(error => { academic.textContent = error.message; });
-}
-
-
-/* =========================================================
-   PROFILE PHOTO
-========================================================= */
-
-function setupPhotoControls() {
-
-  const input =
-    document.getElementById("profilePhotoInput");
-
-  const uploadButton =
-    document.getElementById("uploadPhotoBtn");
-
-  const removeButton =
-    document.getElementById("removePhotoBtn");
-
-
-  if (!input || !uploadButton || !removeButton) {
-    return;
-  }
-
-
-  uploadButton.addEventListener("click", () => {
-    input.click();
-  });
-
-
-  input.addEventListener("change", () => {
-
-    const file = input.files[0];
-
-    if (!file) return;
-
-
-    if (!file.type.startsWith("image/")) {
-
-      alert("Please select an image file.");
-
-      input.value = "";
-
-      return;
-    }
-
-
-    if (file.size > 2 * 1024 * 1024) {
-
-      alert(
-        "Please choose an image smaller than 2 MB."
-      );
-
-      input.value = "";
-
-      return;
-    }
-
-
-    const reader = new FileReader();
-
-
-    reader.onload = () => {
-
-      try {
-
-        localStorage.setItem(
-          PROFILE_PHOTO_KEY,
-          reader.result
-        );
-
-        showProfile();
-
-      } catch (error) {
-
-        console.error(error);
-
-        alert(
-          "This image is too large to save. Please choose a smaller photo."
-        );
-      }
-    };
-
-
-    reader.readAsDataURL(file);
-  });
-
-
-  removeButton.addEventListener("click", () => {
-
-    localStorage.removeItem(
-      PROFILE_PHOTO_KEY
-    );
-
-    showProfile();
-  });
 }
 
 

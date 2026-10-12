@@ -30,8 +30,6 @@ const profileNav = document.getElementById("profileNav");
 let currentMentor = null;
 let mentees = [];
 let pendingRequests = [];
-
-let PROFILE_PHOTO_KEY = "mentorProfilePhoto";
 let unsubscribeRequests;
 window.addEventListener("pagehide", () => unsubscribeRequests?.());
 
@@ -44,7 +42,6 @@ requireAuth(["mentor"])
   .then(async (mentor) => {
 
     currentMentor = mentor;
-    PROFILE_PHOTO_KEY = `mentorProfilePhoto:${mentor.uid}`;
 
     if (header) {
       header.textContent = "Digital No-Due";
@@ -745,12 +742,6 @@ function showProfile() {
   if (!currentMentor) return;
 
 
-  const photo =
-    localStorage.getItem(
-      PROFILE_PHOTO_KEY
-    );
-
-
   const mentorName =
     currentMentor.name ||
     "Mentor";
@@ -788,25 +779,7 @@ function showProfile() {
              background:var(--surface-2, #f1f5f9);
            ">
 
-        ${
-          photo
-
-            ? `
-              <img
-                src="${photo}"
-                alt="Mentor profile photo"
-                style="
-                  width:100%;
-                  height:100%;
-                  object-fit:cover;
-                "
-              >
-            `
-
-            : escapeHtml(
-                getInitials(mentorName)
-              )
-        }
+        ${escapeHtml(getInitials(mentorName))}
 
       </div>
 
@@ -826,39 +799,6 @@ function showProfile() {
       </p>
 
 
-      <input
-        type="file"
-        id="mentorPhotoInput"
-        accept="image/*"
-        style="display:none;"
-      >
-
-
-      <div style="
-        display:flex;
-        justify-content:center;
-        gap:8px;
-        flex-wrap:wrap;
-      ">
-
-        <button
-          id="uploadMentorPhotoBtn"
-          class="btn btn-primary">
-
-          Upload photo
-
-        </button>
-
-
-        <button
-          id="removeMentorPhotoBtn"
-          class="btn-sm">
-
-          Remove photo
-
-        </button>
-
-      </div>
 
     </div>
 
@@ -951,7 +891,6 @@ function showProfile() {
   `;
 
 
-  setupProfilePhotoControls();
 
 }
 
@@ -987,109 +926,6 @@ function profileRow(label, value) {
     </div>
 
   `;
-
-}
-
-
-/* =========================================================
-   PROFILE PHOTO
-========================================================= */
-
-function setupProfilePhotoControls() {
-
-  const input =
-    document.getElementById(
-      "mentorPhotoInput"
-    );
-
-  const uploadButton =
-    document.getElementById(
-      "uploadMentorPhotoBtn"
-    );
-
-  const removeButton =
-    document.getElementById(
-      "removeMentorPhotoBtn"
-    );
-
-
-  if (
-    !input ||
-    !uploadButton ||
-    !removeButton
-  ) {
-
-    return;
-
-  }
-
-
-  uploadButton.addEventListener(
-    "click",
-    () => {
-
-      input.click();
-
-    }
-  );
-
-
-  input.addEventListener(
-    "change",
-    () => {
-
-      const file =
-        input.files?.[0];
-
-      if (!file) return;
-
-
-      if (
-        !file.type.startsWith("image/")
-      ) {
-
-        alert(
-          "Please select an image file."
-        );
-
-        return;
-      }
-
-
-      const reader =
-        new FileReader();
-
-
-      reader.onload = () => {
-
-        localStorage.setItem(
-          PROFILE_PHOTO_KEY,
-          reader.result
-        );
-
-        showProfile();
-
-      };
-
-
-      reader.readAsDataURL(file);
-
-    }
-  );
-
-
-  removeButton.addEventListener(
-    "click",
-    () => {
-
-      localStorage.removeItem(
-        PROFILE_PHOTO_KEY
-      );
-
-      showProfile();
-
-    }
-  );
 
 }
 
