@@ -35,7 +35,7 @@ export async function requestAction(store,actor,id,input){
       const retry=await prepareResubmission(tx,r,id,new Date());patch=retry.patch;reopened=retry.targets;
     }
     else fail('Unknown request action.');
-    const version=(r.version||0)+1,event={requestId:id,studentId:r.studentId,actorId:actor.uid,actorName:actor.name||'',actorType:actor.role,subjectCode:key?r.approvalItems[key].subjectCode||null:null,approvalId:key||null,offeringId:key?r.approvalItems[key].offeringId||null:null,action,decision:decision||null,reason,status:patch.status,version,createdAt:new Date()};
+    const version=(r.version||0)+1,event={requestId:id,studentId:r.studentId,actorId:actor.uid,actorName:actor.name||'',actorType:actor.role,subjectCode:key?r.approvalItems[key].subjectCode||null:null,approvalId:key||null,offeringId:key?r.approvalItems[key].offeringId||null:null,action,decision:decision||null,reason,status:patch.status,version,createdAt:new Date(),...(action==='issue'?{type:'hall_ticket_issued',message:'Your hall ticket has been issued. Please collect it from the office.',read:false}:{})};
     // The latest sibling action can be an approval while the request still needs a retry.
     // Keep the outstanding rejection separate from the latest activity/notification.
     const lastRejection=decision==='rejected'?event:patch.status==='rejected'?(r.lastRejection||(r.lastEvent?.reason&&r.lastEvent.status==='rejected'?r.lastEvent:null)):null;

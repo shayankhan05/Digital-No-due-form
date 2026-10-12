@@ -1,6 +1,7 @@
+import {isManager} from './roles.js';
 import {matchesStudent} from './clearance.js';
 export async function canRead(store,actor,path,data){
-  if(actor.role==='admin')return true;const [collection,id,child]=path.split('/'),uid=actor.uid,role=actor.role;
+  if(isManager(actor.role)){if(path==='settings/institution'&&actor.role!=='super_admin')return false;return true;}const [collection,id,child]=path.split('/'),uid=actor.uid,role=actor.role;
   if(collection==='users')return child==='notifications'?id===uid:id===uid||['student','subject_faculty','mentor'].includes(role)&&data.role!=='student';
   if(collection==='students'){if(child==='clearance')return id===uid;if(id===uid)return true;if(role==='mentor'&&data.mentorId===uid)return true;if(['subject_faculty','mentor'].includes(role)){const enrollment=await store.collection('enrollments').where('studentId','==',id).where('teacherId','==',uid).where('active','==',true).get();for(const e of enrollment.docs){const offering=(await store.doc(`offerings/${e.data().offeringId}`).get()).data();if(offering&&offering.teacherId===uid&&matchesStudent(data,offering))return true;}}return false;}
   if(collection==='settings')return role==='student'&&id==='workflow';
@@ -14,7 +15,7 @@ export async function canRead(store,actor,path,data){
 }
 export async function scopeQuery(store,actor,path,query){
   if(['users','students','enrollments'].includes(path))query=query.where('accountStatus','not-in',['inactive','deleted','deactivating']);
-  if(actor.role==='admin')return query;const [collection,id,child]=path.split('/'),uid=actor.uid,role=actor.role;
+  if(isManager(actor.role)){if(path==='settings'&&actor.role!=='super_admin')return query.where('__name__','==','workflow');return query;}const [collection,id,child]=path.split('/'),uid=actor.uid,role=actor.role;
   if(child){if(collection==='users'&&child==='notifications'&&id===uid)return query;if(collection==='noDueRequests'&&child==='approvals'&&await canRead(store,actor,`noDueRequests/${id}`,(await store.doc(`noDueRequests/${id}`).get()).data()))return query;throw Object.assign(new Error('Forbidden collection.'),{code:'permission-denied'});}
   if(collection==='noDueRequests')return query.where(role==='student'?'studentId':role==='mentor'?'mentorId':role==='hod'?'hodId':role==='office'?'officeId':'approverIds', ['student','mentor','hod','office'].includes(role)?'==':'array-contains',uid);
   if(collection==='hallTickets'&&['student','office'].includes(role)){if(role==='student')return query.where('studentId','==',uid);const requests=await store.collection('noDueRequests').where('officeId','==',uid).get(),issued=await store.collection('hallTickets').where('issuedById','==',uid).get();return query.where('__name__','in',[...new Set([...requests.docs.map(d=>d.id),...issued.docs.map(d=>d.id)])]);}

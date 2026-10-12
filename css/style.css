@@ -1695,6 +1695,19 @@ body:has(.academic-links) .app-shell { flex: 1 1 0; height: auto; min-height: 0;
 /* Authenticated pages expand with the viewport; login remains a compact card. */
 @media (min-width: 768px) { .app-content { padding: 24px; } }
 @media (max-width: 520px) { .app-shell, .academic-links { width: 100%; } }
+
+/* Compact manual marks entry retains the existing theme and button styles. */
+.marks-table-scroll { max-height: 65vh; overflow: auto; }
+.manual-marks-table { width: 100%; border-collapse: collapse; }
+.manual-marks-table thead th { position: sticky; top: 0; z-index: 1; background: var(--white); }
+html[data-theme="dark"] .manual-marks-table thead th,
+body.dark-theme .manual-marks-table thead th,
+body.dark .manual-marks-table thead th { background: #0d0d0d; }
+.manual-marks-table td, .manual-marks-table th { padding: 8px 10px; vertical-align: middle; }
+.manual-marks-table input { width: 90px; min-width: 70px; margin: 0; }
+.manual-marks-table .marks-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.marks-row-status { font-size: .85rem; }
+.marks-row.is-dirty .marks-row-status { font-weight: 600; }
 .reject-fields textarea { display: block; width: 100%; min-height: 96px; margin-block: 8px; }
 .reject-fields .cancel-rejection { margin-top: 8px; }
 

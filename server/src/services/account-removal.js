@@ -1,3 +1,4 @@
+import {isManager} from './roles.js';
 import {randomUUID} from 'node:crypto';
 import {DocumentStore} from './document-store.js';
 import {officeSearchDocument} from './office-search.js';
@@ -20,7 +21,7 @@ async function exitIdentity(database,uid,{profile,student,offerings,blockers}){
 // All exit management operations use the same admin-only endpoint/removal service.
 export async function accountExit({database,client,auth,actor,input={},restoreStudent}){
  const administrator=await database.collection('users').findOne({_id:actor.uid});
- if(administrator?.role!=='admin'||isInactive(administrator))fail('Administrator access required.','permission-denied');
+ if(!isManager(administrator?.role)||isInactive(administrator))fail('Administrator access required.','permission-denied');
  const action=input.action||'remove';
  if(['remove','preview'].includes(action))return accountRemoval({database,client,auth,actor,uid:input.uid,confirmation:input.confirmation,preview:action==='preview'||input.preview===true});
  if(!['student','faculty'].includes(input.kind))fail('Choose student or faculty.');
@@ -87,7 +88,7 @@ async function reactivateAccount({database,client,auth,actor,uid,confirmation,ki
 
 export async function accountRemoval({database,client,auth,actor,uid,confirmation,preview=false}) {
   const administrator=await database.collection('users').findOne({_id:actor.uid});
-  if(administrator?.role!=='admin'||isInactive(administrator))fail('Administrator access required.','permission-denied');
+  if(!isManager(administrator?.role)||isInactive(administrator))fail('Administrator access required.','permission-denied');
   if(typeof uid!=='string'||! /^[A-Za-z0-9_-]{1,128}$/.test(uid))fail('Select an existing account.');
   async function inspect(session) {
     const options={session},profile=await database.collection('users').findOne({_id:uid},options);

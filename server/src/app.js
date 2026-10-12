@@ -1,3 +1,4 @@
+import {isManager} from './services/roles.js';
 import {accountExit} from './services/account-removal.js';
 import express from 'express';
 import cors from 'cors';
@@ -26,7 +27,7 @@ export function createApp({database,client,auth,demo=false,origins=[],smtpPasswo
   app.use('/api/marks-csv',marksCsvRoutes(store));
   app.use('/api',resourceRoutes(store));
   app.post('/api/admin',async(req,res)=>{const result=await service.dispatch(req.actor.uid,req.body);if(req.body.action==='provision'||req.body.action==='repairDemoProfile'){if(result.uid)await syncOfficeSearchIndex(store,result.uid);}res.json(serialize(result));});
-  app.post('/api/students/workflow',async(req,res)=>{const uid=req.body.studentUid||req.actor.uid;if(req.actor.role!=='admin'&&(req.actor.role!=='student'||uid!==req.actor.uid))throw Object.assign(new Error('Not your workflow.'),{code:'permission-denied'});res.json(serialize(await syncStudentWorkflow(store,uid)));});
+  app.post('/api/students/workflow',async(req,res)=>{const uid=req.body.studentUid||req.actor.uid;if(!isManager(req.actor.role)&&(req.actor.role!=='student'||uid!==req.actor.uid))throw Object.assign(new Error('Not your workflow.'),{code:'permission-denied'});res.json(serialize(await syncStudentWorkflow(store,uid)));});
   app.post('/api/office/search',async(req,res)=>res.json(serialize(await searchOfficeStudents(store,req.actor.uid,req.body))));
   app.post('/api/requests',async(req,res)=>res.json(await submitRequest(store,req.actor,req.body.requestKey)));
   app.post('/api/requests/:id/actions',async(req,res)=>res.json(await requestAction(store,req.actor,req.params.id,req.body)));

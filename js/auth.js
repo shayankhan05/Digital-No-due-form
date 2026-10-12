@@ -23,6 +23,7 @@ const ROLE_HOME = {
   hod: "hod-dashboard.html",
   office: "office-dashboard.html",
   admin: "admin-dashboard.html",
+  super_admin: "super-admin-dashboard.html",
 };
 const PROFILE_ERROR = "Your account exists but your institutional profile is not yet configured. Contact administrator.";
 
@@ -76,7 +77,7 @@ export function wireLogout() {
   const btn = document.getElementById("logoutBtn");
   if (btn) {
     btn.addEventListener("click", async () => {
-      await signOut(auth);
+      await signOutAndClear();
       window.location.href = "login.html";
     });
   }
@@ -86,6 +87,8 @@ export function wireLogout() {
 export function wireLoginForm() {
   const form = document.getElementById("loginForm");
   if (!form) return;
+  const notice=sessionStorage.getItem('passwordChangedNotice');
+  if(notice){sessionStorage.removeItem('passwordChangedNotice');const banner=document.createElement('p');banner.className='banner';banner.id='passwordChangedNotice';banner.setAttribute('role','status');banner.textContent=notice;form.before(banner);}
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -108,6 +111,8 @@ if(profile?.mustChangePassword){try{await post('/api/auth/password-complete',{})
 if (!profile) {
   const error = new Error(PROFILE_ERROR); error.code = "institution/profile-missing"; throw error;
 }
+
+
 
 const home = ROLE_HOME[profile.role];
 
@@ -154,4 +159,9 @@ function friendlyAuthError(code) {
     case "auth/too-many-requests": return "Too many attempts. Wait a bit and try again.";
     default: return "Couldn't log in. Check your connection and try again.";
   }
+}
+
+export async function signOutAndClear(){
+  await signOut(auth);
+  for(const key of Object.keys(sessionStorage))if(key.startsWith('temporary-password-reminder:')||key.startsWith('noDueSubmitKey:'))sessionStorage.removeItem(key);
 }

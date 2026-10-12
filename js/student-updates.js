@@ -7,7 +7,7 @@ export async function loadNotifications(uid) {
   return snap.docs.map(d => d.data());
 }
 export function notificationHTML(rows) {
-  return `<div class="card"><h2>Notifications</h2>${rows.length ? rows.map(n => `<article class="banner"><strong>${e(n.decision === 'approved' ? 'Approved' : statusLabel(n.decision || n.status))}</strong><p>${e(n.actorName)} · ${e(n.actorType)} ${e(n.subjectCode || "")}</p>${n.reason ? `<p>Reason: ${e(n.reason)}</p>` : ""}<small>${e(n.createdAt?.toDate?.().toLocaleString() || "")} · Request ${e(n.requestId)}</small></article>`).join("") : '<p class="muted">No notifications yet.</p>'}</div>`;
+  return `<div class="card"><h2>Notifications</h2>${rows.length ? rows.map(n => `<article class="banner"><strong>${e(n.decision === 'approved' ? 'Approved' : statusLabel(n.decision || n.status))}</strong>${n.message?`<p>${e(n.message)}</p>`:''}<p>${e(n.actorName)} · ${e(n.actorType)} ${e(n.subjectCode || "")}</p>${n.reason ? `<p>Reason: ${e(n.reason)}</p>` : ""}<small>${e(n.createdAt?.toDate?.().toLocaleString() || "")} · Request ${e(n.requestId)}</small></article>`).join("") : '<p class="muted">No notifications yet.</p>'}</div>`;
 }
 export function approvalHTML(r) {
   const rows = Object.entries(r.approvalItems || {}).filter(([,item])=>['subject_faculty','library','accounts'].includes(item.approverType)).map(([id, item]) => `<div class="row"><span>${e(item.label)} · ${e(item.subjectCode || "")}${item.teacherName ? `<br>Teacher: ${e(item.teacherName)}`:''}</span><span class="badge">${e(r.approvalStates[id])}</span></div>`).join("");

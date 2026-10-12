@@ -1,10 +1,11 @@
 import {departmentCode} from '../../../js/department.js';
+import {isManager} from './roles.js';
 import {isInactive} from './account-removal.js';
 import {createHash,randomBytes} from 'node:crypto';
 import {FieldValue,HttpsError} from './values.js';
 
 import {matchesStudent,subjectItem} from './clearance.js';
-const roles=['admin','student','subject_faculty','mentor','hod','office','library','physics_lab','chemistry_lab','accounts'];
+const roles=['super_admin','admin','student','subject_faculty','mentor','hod','office','library','physics_lab','chemistry_lab','accounts'];
 const services=['library','accounts'];
 const text=v=>String(v??'').trim();
 const hash=v=>createHash('sha256').update(v).digest('hex');
@@ -23,11 +24,12 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   async function admin(uid) {
     if(!uid) fail('Sign in as an administrator.','unauthenticated');
     const [profile,user]=await Promise.all([db.doc(`users/${uid}`).get(),auth.getUser(uid)]);
-    if(profile.data()?.role!=='admin' || user.disabled) fail('Administrator access required.','permission-denied');
+    if(!isManager(profile.data()?.role) || user.disabled || isInactive(profile.data())) fail('Administrator access required.','permission-denied');
+    return profile.data();
   }
   async function policy() {
     const data=(await db.doc('settings/institution').get()).data() || {};
-    return {...data,allowedDomains:data.allowedDomains || [],departments:[...new Set((data.departments || (demo?['ISE']:[])).map(v=>canonicalDepartment(v,data.departmentAliases))) ],sections:data.sections || ['A','B','C']};
+    return {...data,allowedDomains:data.allowedDomains || [],departments:[...new Set((data.departments || (demo?['ISE']:[])).map(v=>canonicalDepartment(v,data.departmentAliases))) ],schemes:data.schemes || ['2022'],sections:data.sections || ['A','B','C']};
   }
   async function resolve(field,value,roleSet) {
     if(!text(value)) return null;
@@ -180,7 +182,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   }
   // Teacher identity is independent of teaching assignments. Never adopt an
   // unmanaged Auth account or use an import to change an existing user's role.
-  const staffRoles=roles.filter(role=>!['admin','student'].includes(role));
+  const staffRoles=roles.filter(role=>!['super_admin','admin','student'].includes(role));
   const teacherRequestId=row=>`teacher_${hash(row.collegeEmail)}`;
   async function validateTeacher(input,p) {
     if(!input || !staffRoles.includes(text(input.role))) fail('An institutional staff role is required; use subject_faculty for teaching accounts.');
@@ -514,23 +516,28 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
       q=q.startAfter(students.docs.at(-1));
     }while(true);
   }
-  async function savePolicy(input) {
+  async function savePolicy(input,actorId) {
     const allowedDomains=[...new Set((input.allowedDomains || []).map(d=>text(d).toLowerCase().replace(/^@/,'')))];
-    if(!allowedDomains.length || allowedDomains.length>20 || allowedDomains.some(d=>!/^([a-z0-9-]+\.)+[a-z]{2,}$/.test(d) || (!demo && d==='demo.test'))) fail('Configure valid college domains; production cannot allow demo.test.');
     const existingPolicy=await policy();
-    const departments=[...new Set((input.departments || []).map(v=>canonicalDepartment(v,existingPolicy.departmentAliases)))],sections=[...new Set((input.sections || []).map(s=>text(s).toUpperCase()))];
+    if(!allowedDomains.length || allowedDomains.length>20 || allowedDomains.some(d=>!/^([a-z0-9-]+\.)+[a-z]{2,}$/.test(d) || (!demo && d==='demo.test' && !existingPolicy.allowedDomains.includes(d)))) fail('Configure valid college domains; production cannot add demo.test.');
+    const departmentNames=new Map(existingPolicy.departments.map(value=>[value.toLowerCase(),value]));
+    const departments=[...new Map((input.departments || []).map(v=>{const canonical=canonicalDepartment(v,existingPolicy.departmentAliases),key=canonical.toLowerCase();if(!departmentNames.has(key))departmentNames.set(key,canonical);return [key,departmentNames.get(key)];})).values()],sections=[...new Set((input.sections || []).map(s=>text(s).toUpperCase()))];
     if(!departments.length || departments.length>50 || departments.some(d=>!d || d.length>100) || !sections.length || sections.length>50 || sections.some(s=>! /^[A-Z0-9-]{1,10}$/.test(s))) fail('Configure departments and sections.');
     const smtpPort=Number(input.smtpPort || 465);if(![465,587].includes(smtpPort)) fail('SMTP port must be 465 or 587.');
-    const data={allowedDomains,departments,sections,...(existingPolicy.departmentAliases?{departmentAliases:existingPolicy.departmentAliases}:{}),smtpHost:text(input.smtpHost),smtpPort,smtpUser:text(input.smtpUser),mailFrom:text(input.mailFrom),updatedAt:stamp()};
+    const schemes=[...new Set((input.schemes || existingPolicy.schemes).map(v=>text(v).replace(/\s+scheme$/i,'').toUpperCase()))];
+    if(!schemes.length || schemes.length>50 || schemes.some(v=>! /^[A-Z0-9_-]{1,30}$/.test(v)))fail('Configure valid schemes.');
+    const data={allowedDomains,departments,schemes,sections,...(existingPolicy.departmentAliases?{departmentAliases:existingPolicy.departmentAliases}:{}),smtpHost:text(input.smtpHost),smtpPort,smtpUser:text(input.smtpUser),mailFrom:text(input.mailFrom),updatedAt:stamp()};
     if(data.smtpHost && !/^[a-zA-Z0-9.-]+$/.test(data.smtpHost)) fail('Invalid SMTP host.');
-    await db.doc('settings/institution').set(data,{merge:true});return {saved:true};
+    await db.runTransaction(async tx=>{tx.set(db.doc('settings/institution'),data,{merge:true});tx.create(db.collection('accountExitEvents').doc(),{action:'institution_settings_updated',actorId,at:stamp(),fields:Object.keys(data).filter(k=>k!=='updatedAt')});});return {saved:true};
   }
   async function dispatch(uid,data) {
-    await admin(uid);
+    const actor=await admin(uid);
     if(!data || typeof data!=='object') fail('Operation is required.');
+    if(data.action==='savePolicy'&&actor.role!=='super_admin')fail('Only Super Admin can manage institution settings.','permission-denied');
+    if(actor.role!=='super_admin'&&['previewAccounts','provision','repairDemoProfile'].includes(data.action)&&[data.row,...(data.rows||[])].some(row=>row?.role==='super_admin'))fail('Only Super Admin can create Super Admin accounts.','permission-denied');
     switch(data.action) {
-      case 'policy': {const {updatedAt,...p}=await policy();return {...p,demo};}
-      case 'savePolicy':return savePolicy(data.policy || {});
+      case 'policy': {const p=await policy();const keys=actor.role==='super_admin'?['allowedDomains','departments','schemes','sections','smtpHost','smtpPort','smtpUser','mailFrom']:['departments','schemes','sections'];return {...Object.fromEntries(keys.map(k=>[k,p[k]])),demo};}
+      case 'savePolicy':return savePolicy(data.policy || {},uid);
       case 'previewAccounts':return previewAccounts(data.rows);
       case 'provision':return provision(uid,data.row,data.requestId);
       case 'repairDemoProfile':return repairDemoProfile(data.row,data.expectedUid);
@@ -560,5 +567,14 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     for(const id of dependencies){const user=id&&(await db.doc(`users/${id}`).get()).data();if(!user||isInactive(user))fail('Reassign inactive or missing mentor/teacher/workflow dependencies before reactivation.');}
     return mapStudent(uid,student,offerings,{preserveExisting:true});
   }
-  return {dispatch,restoreStudentMappings};
+  // Operator-only first-admin bootstrap; never exposed by the HTTP dispatcher.
+  async function bootstrapSuperAdmin(caller,row,requestId){
+    await admin(caller);if(row.role!=='super_admin')fail('Super Admin bootstrap requires that role.');
+    const existing=await db.collection('users').where('role','==','super_admin').get();
+    if(existing.docs.some(d=>email(d.data().email)!==email(row.collegeEmail)))fail('Super Admin already exists; use its normal account management tools.');
+    const result=await provision(caller,row,requestId);
+    if(result.accountCreated)await db.runTransaction(async tx=>{const ref=db.doc('accountExitEvents/super_admin_bootstrap_'+result.uid);if(!(await tx.get(ref)).exists)tx.create(ref,{action:'super_admin_bootstrap',actorId:caller,targetUid:result.uid,at:stamp()});});
+    return result;
+  }
+  return {dispatch,restoreStudentMappings,bootstrapSuperAdmin};
 }
