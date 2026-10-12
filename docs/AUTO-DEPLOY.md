@@ -12,7 +12,7 @@ The existing service is https://dashboard.render.com/web/srv-db5m85qd0e5s73fuvsb
 
 `.github/workflows/firebase-hosting.yml` deploys the live Hosting site on pushes to `main`. It can also be started manually from GitHub Actions. It deploys Hosting only, using the existing `firebase.json` exclusions; it does not deploy Functions, rules, Auth or database data.
 
-One-time setup: configure the repository Actions secret `FIREBASE_SERVICE_ACCOUNT_DIGITAL_NO_DUE_SHAYAN` with a dedicated service account JSON for project `digital-no-due-shayan`. Grant only Firebase Hosting Admin and Service Usage Consumer for this static site; do not use the application's broad Firebase Admin credential. Never commit the JSON key.
+The repository Actions secret `FIREBASE_SERVICE_ACCOUNT_DIGITAL_NO_DUE_SHAYAN` is configured with the dedicated `github-hosting-deploy` service account in project `digital-no-due-shayan`. It has only Firebase Hosting Admin and Service Usage Consumer roles. The key is stored as an encrypted Actions secret, not in the repository. Do not replace it with the application's broad Firebase Admin credential or commit the JSON key.
 
 Repository secrets: https://github.com/shayankhan05/Digital-No-due-form/settings/secrets/actions
 
