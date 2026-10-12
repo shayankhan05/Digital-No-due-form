@@ -1,0 +1,34 @@
+name: Deploy frontend to Firebase Hosting
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-hosting-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check deployment credential
+        env:
+          HOSTING_CREDENTIAL: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DIGITAL_NO_DUE_SHAYAN }}
+        run: |
+          if [ -z "$HOSTING_CREDENTIAL" ]; then
+            echo "::error::Configure FIREBASE_SERVICE_ACCOUNT_DIGITAL_NO_DUE_SHAYAN in repository Actions secrets before deploying."
+            exit 1
+          fi
+      - name: Deploy live frontend
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DIGITAL_NO_DUE_SHAYAN }}
+          projectId: digital-no-due-shayan
+          channelId: live
