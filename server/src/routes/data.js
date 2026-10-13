@@ -29,6 +29,10 @@ async function validateAdmin(store,path,data,actor){
     if(candidate.departmentId&&candidate.department){const inferred=await departmentOf(store.database,collection,{...candidate,departmentId:undefined,scope:undefined});if(inferred!==candidate.departmentId)throw new Error('Department reference does not match the department code.');}
     if(['student','subject_faculty','mentor','hod'].includes(candidate.role)&&candidate.scope==='institution')throw new Error('This role requires department scope.');
     for(const field of ['teacherId','mentorId'])if(candidate[field]){const owner=(await store.doc('users/'+candidate[field]).get()).data();if(owner?.departmentId&&candidate.departmentId&&owner.departmentId!==candidate.departmentId)throw new Error('Teacher or mentor belongs to another department.');}
+    if(['students','subjects','offerings'].includes(collection)&&candidate.scheme&&(!previous||candidate.scheme!==previous.scheme)&&await store.database.collection('schemes').countDocuments()){
+      const scheme=await store.database.collection('schemes').findOne({code:String(candidate.scheme),status:'active'}),did=await departmentOf(store.database,collection,candidate);
+      if(!scheme||scheme.scope==='department'&&!scheme.departmentIds?.includes(did))throw new Error('Choose an active scheme applicable to this department.');
+    }
   }
   if(/"(password|passwordHash|privateKey)"\s*:/.test(JSON.stringify(data)))throw new Error('Credentials are not application data.');
   if(collection==='users'&&data.role&&!['super_admin','admin','student','subject_faculty','mentor','hod','office','library','accounts','physics_lab','chemistry_lab'].includes(data.role))throw new Error('Invalid role.');

@@ -452,6 +452,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     const p=await policy(),row={...input};
     row.department=canonicalDepartment(row.department,p.departmentAliases);row.scheme=text(row.scheme);row.semester=Number(row.semester);row.section=text(row.section).toUpperCase();row.subjectCode=text(row.subjectCode);row.subjectName=text(row.subjectName);row.teacherEmail=email(row.teacherEmail);
     if(!p.departments.includes(row.department) || !p.sections.includes(row.section) || !row.scheme || !Number.isInteger(row.semester) || row.semester<1 || row.semester>12) fail('Valid department, scheme, semester and section are required.');
+    if(p.schemeRecords.length&&!p.schemeRecords.some(s=>s.code===row.scheme&&s.status==='active'&&(s.scope==='institution'||s.departmentIds?.includes(p.departmentRecords.find(d=>d.code===row.department)?.id))))fail('Choose an active scheme applicable to this department.');
     if(!row.subjectCode || !row.subjectName || row.subjectCode.length>40 || row.subjectName.length>200) fail('Confirmed subject code and name are required; do not guess source fields.');
     const teacher=await resolve('email',row.teacherEmail,['subject_faculty','mentor']);
     if(!teacher) fail('An existing teacher email is required.');if(teacher.scope==='department'&&canonicalDepartment(teacher.department)!==row.department)fail('Teacher belongs to another department.');row.teacherId=teacher.uid;
