@@ -2,11 +2,16 @@ import {roleLabel,accountLabel} from './display-labels.js';
 import {mountAccountDirectory,mountLeadership} from './admin-console.js';
 import {apiFetch,post} from './api.js';
 import {escapeHtml as e,busy} from './ui.js';
+function placeDepartmentContext(card){
+ const main=document.querySelector('main');if(!main)return;
+ if(!main.parentElement.classList.contains('department-scroll')){const scroll=document.createElement('div');scroll.className='department-scroll';main.before(scroll);scroll.append(main);}
+ main.before(card);
+}
 export async function mountDepartmentContext(profile){
- if(profile.role==='admin'&&profile.departmentId){const info=document.createElement('div');info.className='card';info.id='departmentContext';info.textContent='Managing Department: '+(profile.department||'');document.querySelector('main')?.before(info);return;}if(profile.role!=='super_admin')return;
+ if(profile.role==='admin'&&profile.departmentId){const info=document.createElement('div');info.className='card';info.id='departmentContext';info.textContent='Managing Department: '+(profile.department||'');placeDepartmentContext(info);return;}if(profile.role!=='super_admin')return;
  const masters=await apiFetch('/api/administration/masters'),current=sessionStorage.getItem('department-context:'+profile.uid)||'';
  const box=document.createElement('div');box.className='card';box.id='departmentContext';box.innerHTML=`<label>Managing Department<select id="managementDepartment"><option value="">All Departments</option>${masters.departments.map(d=>`<option value="${e(d._id)}" ${d._id===current?'selected':''}>${e(d.name)} (${e(d.code)})${d.status==='inactive'?' — inactive':''}</option>`).join('')}</select></label>`;
- document.querySelector('main')?.before(box);box.style.maxWidth='1050px';box.style.margin='12px auto';
+ placeDepartmentContext(box);box.style.maxWidth='1050px';box.style.margin='12px auto';
  box.querySelector('select').onchange=event=>{if(event.target.value)sessionStorage.setItem('department-context:'+profile.uid,event.target.value);else sessionStorage.removeItem('department-context:'+profile.uid);location.reload();};
 }
 export async function mountDepartmentManagement(actor){

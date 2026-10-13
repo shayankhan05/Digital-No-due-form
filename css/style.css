@@ -1703,6 +1703,8 @@ body:has(.academic-links) .app-shell { flex: 1 1 0; height: auto; min-height: 0;
 
 /* Department context scrolls with the page; confirmations use native checkboxes. */
 #departmentContext { position: static; inset: auto; transform: none; }
+.department-scroll { flex: 1 1 auto; min-height: 0; min-width: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.department-scroll > .app-content { flex: none; overflow: visible; }
 .action-confirmation { width: auto; flex: 0 0 auto; vertical-align: middle; margin-right: .5rem; }
 .provision-actions[hidden] { display: none; }
 html[data-theme="dark"] .manual-marks-table thead th,
