@@ -1,3 +1,4 @@
+import {sectionMaster} from './section-master.js';
 import {departmentCode} from '../../../js/department.js';
 import {isManager} from './roles.js';
 import {isInactive} from './account-removal.js';
@@ -28,7 +29,7 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     return profile.data();
   }
   async function policy() {
-    const data=(await db.doc('settings/institution').get()).data() || {};
+    const data=(await db.doc('settings/institution').get()).data() || {};data.sections=sectionMaster(data).filter(s=>s.status==='active').map(s=>s.code);
     const masters=await db.collection('departments').get(),schemeRows=await db.collection('schemes').get();if(departmentBootstrap){const staged=masters.docs.find(d=>d.id===departmentBootstrap.id&&d.data().code===departmentBootstrap.code&&d.data().status==='provisioning');if(!staged)fail('Invalid department provisioning job.');}
     if(!masters.empty)data.departments=masters.docs.filter(d=>d.data().status==='active'||departmentBootstrap&&d.id===departmentBootstrap.id).map(d=>d.data().code);if(!schemeRows.empty)data.schemes=schemeRows.docs.filter(d=>d.data().status==='active').map(d=>d.data().code);return {...data,departmentRecords:masters.docs.map(d=>({...d.data(),id:d.id})),schemeRecords:schemeRows.docs.map(d=>({...d.data(),id:d.id})),allowedDomains:data.allowedDomains || [],departments:[...new Set((data.departments || (demo?['ISE']:[])).map(v=>canonicalDepartment(v,data.departmentAliases))) ],schemes:data.schemes || ['2022'],sections:data.sections || ['A','B','C']};
   }
@@ -66,7 +67,7 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
       row.usn=text(row.usn).toUpperCase();row.semester=Number(row.semester);row.section=text(row.section).toUpperCase();
       if(!/^[A-Z0-9-]{4,30}$/.test(row.usn)) fail('A valid USN is required.');
       if(!Number.isInteger(row.semester) || row.semester<1 || row.semester>12) fail('Semester must be an integer from 1 to 12.');
-      if(!(p.departmentRecords.find(d=>d.code===row.department)?.sections||p.sections).includes(row.section)) fail('Choose a configured section.');
+      if(!p.sections.includes(row.section)||!(p.departmentRecords.find(d=>d.code===row.department)?.sections||p.sections).includes(row.section)) fail('Choose a configured section.');
       if(!row.scheme) fail('Scheme is required.');if(p.schemeRecords.length&&!p.schemeRecords.some(s=>s.code===row.scheme&&s.status==='active'&&(s.scope==='institution'||s.departmentIds?.includes(p.departmentRecords.find(d=>d.code===row.department)?.id))&&(!p.departmentRecords.find(d=>d.code===row.department)?.schemeIds?.length||p.departmentRecords.find(d=>d.code===row.department).schemeIds.includes(s.id))))fail('Choose an active scheme applicable to this department.');
     } else if(!row.facultyId || !/^[A-Z0-9_-]{1,80}$/.test(row.facultyId)) fail('Faculty/employee ID must contain letters, numbers, hyphens or underscores.');
     return row;
@@ -520,10 +521,10 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
   }
   async function savePolicy(input,actorId) {
     const allowedDomains=[...new Set((input.allowedDomains || []).map(d=>text(d).toLowerCase().replace(/^@/,'')))];
-    const existingPolicy=await policy();if(existingPolicy.departmentRecords.length){input={...input,departments:existingPolicy.departments,schemes:existingPolicy.schemes};}
+    const existingPolicy=await policy();if(existingPolicy.departmentRecords.length){input={...input,departments:existingPolicy.departments,schemes:existingPolicy.schemes,sections:existingPolicy.sections};}
     if(!allowedDomains.length || allowedDomains.length>20 || allowedDomains.some(d=>!/^([a-z0-9-]+\.)+[a-z]{2,}$/.test(d) || (!demo && d==='demo.test' && !existingPolicy.allowedDomains.includes(d)))) fail('Configure valid college domains; production cannot add demo.test.');
     const departmentNames=new Map(existingPolicy.departments.map(value=>[value.toLowerCase(),value]));
-    const departments=[...new Map((input.departments || []).map(v=>{const canonical=canonicalDepartment(v,existingPolicy.departmentAliases),key=canonical.toLowerCase();if(!departmentNames.has(key))departmentNames.set(key,canonical);return [key,departmentNames.get(key)];})).values()],sections=[...new Set((input.sections || []).map(s=>text(s).toUpperCase()))];
+    const departments=[...new Map((input.departments || []).map(v=>{const canonical=canonicalDepartment(v,existingPolicy.departmentAliases),key=canonical.toLowerCase();if(!departmentNames.has(key))departmentNames.set(key,canonical);return [key,departmentNames.get(key)];})).values()],sections=[...new Set((input.sections || existingPolicy.sections).map(s=>text(s).toUpperCase()))];
     if(!departments.length || departments.length>50 || departments.some(d=>!d || d.length>100) || !sections.length || sections.length>50 || sections.some(s=>! /^[A-Z0-9-]{1,10}$/.test(s))) fail('Configure departments and sections.');
     const smtpPort=Number(input.smtpPort || 465);if(![465,587].includes(smtpPort)) fail('SMTP port must be 465 or 587.');
     const schemes=[...new Set((input.schemes || existingPolicy.schemes).map(v=>text(v).replace(/\s+scheme$/i,'').toUpperCase()))];

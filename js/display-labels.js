@@ -10,3 +10,6 @@ export function accountLabel(account,peers=[]){
  const index=group.findIndex(p=>(p.uid||p._id||p.email)===(account.uid||account._id||account.email));
  return base+(index>0?' '+(index+1):'');
 }
+
+const auditLabels={ACCOUNT_BULK_DEACTIVATED:'Account Deactivated',ACCOUNT_BULK_REACTIVATED:'Account Reactivated',HOD_REPLACED:'HOD Changed',HOD_ASSIGNED:'HOD Assigned',DEPARTMENT_ADMIN_REPLACED:'Department Admin Changed',DEPARTMENT_CREATED:'Department Created',DEPARTMENT_ADMIN_CREATED:'Department Admin Created',SECTION_CREATED:'Section Created',SECTION_ACTIVATED:'Section Activated',SECTION_DEACTIVATED:'Section Deactivated'};
+export const auditActionLabel=action=>auditLabels[action]||String(action||'').toLowerCase().replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());

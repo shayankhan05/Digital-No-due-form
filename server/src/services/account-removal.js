@@ -68,7 +68,7 @@ async function reactivateAccount({database,client,auth,actor,uid,confirmation,ki
   if(duplicate)fail('USN/employee ID conflicts with another institutional identity.');
   operationId=profile.exitOperationId||randomUUID();await database.collection('users').updateOne({_id:uid},{$set:{exitOperation:'reactivating',exitOperationId:operationId}},{session});
  });}finally{await session.endSession();}
- if(!isInactive(profile))return {uid,accountStatus:'active',message:'Existing account is already active.'};
+ if(!isInactive(profile))return {uid,accountStatus:'active',status:'skipped',code:'ALREADY_ACTIVE',message:'Existing account is already active.'};
  let subjectsMapped=0;
  try{
   await auth.revokeRefreshTokens(uid);await auth.updateUser(uid,{disabled:false});
@@ -137,7 +137,7 @@ export async function accountRemoval({database,client,auth,actor,uid,confirmatio
       await database.collection('notifications').updateMany({$or:[{studentId:uid},{__parent:uid}],read:{$ne:true}},{$set:{archived:true,archivedAt:stamp}},options);
     }
   });} finally {await session.endSession();}
-  if(completedRemoval)return {uid,accountStatus:'inactive',authDisabled:true,message:'Account deactivated. Historical records preserved.'};
+  if(completedRemoval)return {uid,accountStatus:'inactive',authDisabled:true,status:'skipped',code:'ALREADY_INACTIVE',message:'Account is already inactive. Historical records preserved.'};
   // Mongo closes access first. If Firebase is temporarily unavailable, retries finish
   // this operation; the institutional account remains blocked in the meantime.
   try {await auth.updateUser(uid,{disabled:true});await auth.revokeRefreshTokens(uid);}

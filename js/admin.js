@@ -1,3 +1,4 @@
+import {mountAcademicSelects} from './master-controls.js';
 import {roleLabel,accountLabel} from './display-labels.js';
 import {departmentLabel} from './department.js';
 import { db } from "./firebase-config.js";
@@ -20,9 +21,9 @@ const fields = {
   assignments: ["id","offeringId","title","description","dueDate","status"],
   settings: [...SERVICES,"hodId","officeId"]
 };
-let actor,departmentOptions=[];
+let actor,departmentOptions=[],academicMasters={departments:[],schemes:[],sections:[]};
 let selected = "students", cursor, listed = [];
-requireAuth(["admin","super_admin"]).then(async profile => {actor=profile;try{departmentOptions=(await(await import('./api.js')).apiFetch('/api/administration/masters')).departments;}catch{}return render();}).catch(error => errorState(content, error));
+requireAuth(["admin","super_admin"]).then(async profile => {actor=profile;try{academicMasters=await(await import('./api.js')).apiFetch('/api/administration/masters');departmentOptions=academicMasters.departments;}catch{}return render();}).catch(error => errorState(content, error));
 async function render() {
   content.innerHTML = `<div class="banner">Create sign-in accounts in Firebase Authentication, then link their actual UID here.</div><div class="tab-strip">${Object.keys(fields).map(key => `<button class="btn-sm tab" data-key="${key}">${e(({users:"Staff & accounts",offerings:"Classes & teachers",enrollments:"Student subjects",settings:"Workflow assignments"})[key] || key)}</button>`).join("")}</div>
     <div class="card"><h2>${e(({users:"Staff & accounts",students:"Students",subjects:"Subjects",offerings:"Classes & teachers",enrollments:"Student subjects",assignments:"Assignments",settings:"Workflow Setup"})[selected]||selected)}</h2><form id="recordForm">${fields[selected].map(key => `<label>${e(key)}${key === "department" && departmentOptions.length ? `<select name="department"><option value="">Choose department</option>${departmentOptions.filter(d=>d.status==='active'&&(!sessionStorage.getItem('department-context:'+actor.uid)||d._id===sessionStorage.getItem('department-context:'+actor.uid))).map(d=>`<option value="${e(d.code)}">${e(d.name)}</option>`).join('')}</select>` : key === "role" ? `<select name="role">${ROLES.filter(r=>actor.role==='super_admin'||r!=='super_admin').map(r => `<option value="${e(r)}">${e(roleLabel(r))}</option>`).join("")}</select>` : `<input name="${e(key)}" ${key === "semester" ? 'type="number" min="1" max="12"' : key === "email" ? 'type="email"' : key === "dueDate" ? 'type="date"' : 'type="text"'}>`}</label>`).join("")}${selected === "offerings" ? '<label>Assessments: ID, label, maximum (one per line)<textarea name="components" rows="4" placeholder="ia1, Internal assessment 1, 30"></textarea></label>' : ""}<button class="btn-primary" type="submit">Save record</button></form><p id="saveMessage" role="status"></p></div>
@@ -30,6 +31,7 @@ async function render() {
     <div class="card"><h2>Prepare student clearance</h2><label>Student Auth UID<input id="planUid"></label><button id="planBtn" class="btn-primary">Refresh academic mappings & clearance plan</button><p>Run after changing mentor, teacher, class or enrollments. Existing requests retain their assigned approvers.</p></div>
     <div class="card"><h2>Student CSV import</h2><p>Headers: uid,name,usn,email,phone,semester,section,mentorId. Actual Auth UIDs are required.</p><input id="csv" type="file" accept=".csv"><button id="csvPreviewBtn" class="btn-sm">Preview CSV</button><div id="csvPreview"></div><button id="csvSave" class="btn-primary" disabled>Import reviewed students</button></div>
     <div class="card"><h2>Legacy request compatibility</h2><label>Existing request ID<input id="legacyId"></label><button id="legacyBtn" class="btn-sm">Review & upgrade existing request</button><p>Preserves existing approvals and request status. Review mappings before confirming.</p></div>`;
+  mountAcademicSelects(document.getElementById('recordForm'),academicMasters);
   document.querySelectorAll(".tab").forEach(b => b.onclick = () => { selected = b.dataset.key; cursor = null; listed = []; render().catch(error => errorState(content,error)); });
   document.getElementById("recordForm").onsubmit = event => { event.preventDefault(); busy(event.target.querySelector("button"), () => save(new FormData(event.target))); };
   document.getElementById("lookupBtn").onclick = event => busy(event.target, async () => { const row = await record(selected, document.getElementById("lookup").value.trim()); if (!row) throw new Error("Record not found."); edit(row); });
@@ -60,7 +62,8 @@ async function render() {
 async function edit(row) {
   if (selected === "users" && row.role === "student") row = {...row, ...(await record("students",row.id))};
   const form = document.getElementById("recordForm");
-  for (const key of fields[selected]) if (form.elements[key]) form.elements[key].value = (key==='department'?departmentLabel(row[key]):row[key]) ?? (key === "uid" ? row.id : "");
+  for(const key of ['scheme','section'])if(form.elements[key]?.tagName==='SELECT'&&row[key]&&!Array.from(form.elements[key].options).some(o=>o.value===String(row[key])))form.elements[key].add(new Option(String(row[key])+' (existing assignment)',String(row[key])));
+  for (const key of fields[selected]) if (form.elements[key]) form.elements[key].value = (key==='department'?departmentOptions.find(d=>d.code===row[key]||d.name===row[key])?.code||row[key]:row[key]) ?? (key === "uid" ? row.id : "");
   if (selected === "offerings") form.elements.components.value = (row.components || []).map(c => `${c.id}, ${c.label}, ${c.max}`).join("\n");
 }
 async function loadList(append = false) {
