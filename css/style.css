@@ -1700,6 +1700,11 @@ body:has(.academic-links) .app-shell { flex: 1 1 0; height: auto; min-height: 0;
 .marks-table-scroll { max-height: 65vh; overflow: auto; }
 .manual-marks-table { width: 100%; border-collapse: collapse; }
 .manual-marks-table thead th { position: sticky; top: 0; z-index: 1; background: var(--white); }
+
+/* Department context scrolls with the page; confirmations use native checkboxes. */
+#departmentContext { position: static; inset: auto; transform: none; }
+.action-confirmation { width: auto; flex: 0 0 auto; vertical-align: middle; margin-right: .5rem; }
+.provision-actions[hidden] { display: none; }
 html[data-theme="dark"] .manual-marks-table thead th,
 body.dark-theme .manual-marks-table thead th,
 body.dark .manual-marks-table thead th { background: #0d0d0d; }

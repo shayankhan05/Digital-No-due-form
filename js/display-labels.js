@@ -1,0 +1,12 @@
+const roles={student:'Student',subject_faculty:'Subject Faculty',mentor:'Mentor',hod:'HOD',office:'Office',library:'Library',accounts:'Accounts',physics_lab:'Physics Lab',chemistry_lab:'Chemistry Lab',admin:'Admin',super_admin:'Super Admin'};
+export const roleLabel=role=>roles[role]||String(role||'').replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
+export const isServiceAccount=account=>['office','library','accounts','physics_lab','chemistry_lab'].includes(account.role);
+const technical=account=>!account.name||/^(demo|test|mongo)[\s_-]/i.test(account.name)||/^[a-z]\d+$/i.test(account.name)||account.name.includes('@')||account.name.toLowerCase().replaceAll('_',' ')===String(account.role).replaceAll('_',' ');
+// Display aliases only: option values, UIDs, email search and stored profiles stay unchanged.
+export function accountLabel(account,peers=[]){
+ if(!isServiceAccount(account)||!technical(account))return account.name||roleLabel(account.role);
+ const base=account.role==='office'?(account.scope==='institution'?'Central Office':'Department Office'):roleLabel(account.role);
+ const group=peers.filter(p=>p.role===account.role&&technical(p)&&(p.scope==='institution')===(account.scope==='institution')).sort((a,b)=>String(a.uid||a._id||a.email).localeCompare(String(b.uid||b._id||b.email)));
+ const index=group.findIndex(p=>(p.uid||p._id||p.email)===(account.uid||account._id||account.email));
+ return base+(index>0?' '+(index+1):'');
+}

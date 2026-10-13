@@ -17,7 +17,7 @@ const snapshotData=s=>s.exists?{...s.data(),uid:s.id}:null;
 // Existing local demo policy; production explicitly opts in by account type.
 // This public demo credential is never persisted in institutional data.
 const demoTemporaryPassword='DemoPassword123!';
-export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{throw new Error('Mail delivery is not configured.');}}) {
+export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,sendActivation=async()=>{throw new Error('Mail delivery is not configured.');}}) {
   // Production demo provisioning is an explicit institution policy, scoped to
   // student or staff demo addresses. It never switches Auth to an emulator.
   const temporaryAccount=(row,p)=>demo || email(row.collegeEmail || row.email).endsWith('@demo.test') && (row.role==='student'?p.demoStudentProvisioningEnabled===true:p.demoStaffProvisioningEnabled===true);
@@ -29,7 +29,8 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   }
   async function policy() {
     const data=(await db.doc('settings/institution').get()).data() || {};
-    const masters=await db.collection('departments').get(),schemeRows=await db.collection('schemes').get();if(!masters.empty)data.departments=masters.docs.filter(d=>d.data().status==='active').map(d=>d.data().code);if(!schemeRows.empty)data.schemes=schemeRows.docs.filter(d=>d.data().status==='active').map(d=>d.data().code);return {...data,departmentRecords:masters.docs.map(d=>({...d.data(),id:d.id})),schemeRecords:schemeRows.docs.map(d=>d.data()),allowedDomains:data.allowedDomains || [],departments:[...new Set((data.departments || (demo?['ISE']:[])).map(v=>canonicalDepartment(v,data.departmentAliases))) ],schemes:data.schemes || ['2022'],sections:data.sections || ['A','B','C']};
+    const masters=await db.collection('departments').get(),schemeRows=await db.collection('schemes').get();if(departmentBootstrap){const staged=masters.docs.find(d=>d.id===departmentBootstrap.id&&d.data().code===departmentBootstrap.code&&d.data().status==='provisioning');if(!staged)fail('Invalid department provisioning job.');}
+    if(!masters.empty)data.departments=masters.docs.filter(d=>d.data().status==='active'||departmentBootstrap&&d.id===departmentBootstrap.id).map(d=>d.data().code);if(!schemeRows.empty)data.schemes=schemeRows.docs.filter(d=>d.data().status==='active').map(d=>d.data().code);return {...data,departmentRecords:masters.docs.map(d=>({...d.data(),id:d.id})),schemeRecords:schemeRows.docs.map(d=>({...d.data(),id:d.id})),allowedDomains:data.allowedDomains || [],departments:[...new Set((data.departments || (demo?['ISE']:[])).map(v=>canonicalDepartment(v,data.departmentAliases))) ],schemes:data.schemes || ['2022'],sections:data.sections || ['A','B','C']};
   }
   async function resolve(field,value,roleSet) {
     if(!text(value)) return null;
@@ -54,7 +55,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   function normalize(input,p) {
     const row={role:'student',...input};
     row.name=text(row.name);row.collegeEmail=email(row.collegeEmail || row.email);row.department=canonicalDepartment(row.department,p.departmentAliases);
-    row.scope=['student','subject_faculty','mentor','hod'].includes(row.role)?'department':row.scope==='department'?'department':'institution';row.phone=text(row.phone);row.scheme=text(row.scheme);row.facultyId=text(row.facultyId || row.employeeId).toUpperCase();
+    row.scope=['admin','student','subject_faculty','mentor','hod'].includes(row.role)?'department':row.scope==='department'?'department':'institution';row.phone=text(row.phone);row.scheme=text(row.scheme);row.facultyId=text(row.facultyId || row.employeeId).toUpperCase();
     if(!roles.includes(row.role)) fail('Unsupported role.');
     if(!row.name || row.name.length>150) fail('Name is required (maximum 150 characters).');
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.collegeEmail)) fail('Valid college email is required.');
@@ -65,8 +66,8 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
       row.usn=text(row.usn).toUpperCase();row.semester=Number(row.semester);row.section=text(row.section).toUpperCase();
       if(!/^[A-Z0-9-]{4,30}$/.test(row.usn)) fail('A valid USN is required.');
       if(!Number.isInteger(row.semester) || row.semester<1 || row.semester>12) fail('Semester must be an integer from 1 to 12.');
-      if(!p.sections.includes(row.section)) fail('Choose a configured section.');
-      if(!row.scheme) fail('Scheme is required.');if(p.schemeRecords.length&&!p.schemeRecords.some(s=>s.code===row.scheme&&s.status==='active'&&(s.scope==='institution'||s.departmentIds?.includes(p.departmentRecords.find(d=>d.code===row.department)?.id))))fail('Choose an active scheme applicable to this department.');
+      if(!(p.departmentRecords.find(d=>d.code===row.department)?.sections||p.sections).includes(row.section)) fail('Choose a configured section.');
+      if(!row.scheme) fail('Scheme is required.');if(p.schemeRecords.length&&!p.schemeRecords.some(s=>s.code===row.scheme&&s.status==='active'&&(s.scope==='institution'||s.departmentIds?.includes(p.departmentRecords.find(d=>d.code===row.department)?.id))&&(!p.departmentRecords.find(d=>d.code===row.department)?.schemeIds?.length||p.departmentRecords.find(d=>d.code===row.department).schemeIds.includes(s.id))))fail('Choose an active scheme applicable to this department.');
     } else if(!row.facultyId || !/^[A-Z0-9_-]{1,80}$/.test(row.facultyId)) fail('Faculty/employee ID must contain letters, numbers, hyphens or underscores.');
     return row;
   }
@@ -452,7 +453,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     const p=await policy(),row={...input};
     row.department=canonicalDepartment(row.department,p.departmentAliases);row.scheme=text(row.scheme);row.semester=Number(row.semester);row.section=text(row.section).toUpperCase();row.subjectCode=text(row.subjectCode);row.subjectName=text(row.subjectName);row.teacherEmail=email(row.teacherEmail);
     if(!p.departments.includes(row.department) || !p.sections.includes(row.section) || !row.scheme || !Number.isInteger(row.semester) || row.semester<1 || row.semester>12) fail('Valid department, scheme, semester and section are required.');
-    if(p.schemeRecords.length&&!p.schemeRecords.some(s=>s.code===row.scheme&&s.status==='active'&&(s.scope==='institution'||s.departmentIds?.includes(p.departmentRecords.find(d=>d.code===row.department)?.id))))fail('Choose an active scheme applicable to this department.');
+    if(p.schemeRecords.length&&!p.schemeRecords.some(s=>s.code===row.scheme&&s.status==='active'&&(s.scope==='institution'||s.departmentIds?.includes(p.departmentRecords.find(d=>d.code===row.department)?.id))&&(!p.departmentRecords.find(d=>d.code===row.department)?.schemeIds?.length||p.departmentRecords.find(d=>d.code===row.department).schemeIds.includes(s.id))))fail('Choose an active scheme applicable to this department.');
     if(!row.subjectCode || !row.subjectName || row.subjectCode.length>40 || row.subjectName.length>200) fail('Confirmed subject code and name are required; do not guess source fields.');
     const teacher=await resolve('email',row.teacherEmail,['subject_faculty','mentor']);
     if(!teacher) fail('An existing teacher email is required.');if(teacher.scope==='department'&&canonicalDepartment(teacher.department)!==row.department)fail('Teacher belongs to another department.');row.teacherId=teacher.uid;

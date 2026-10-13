@@ -1,3 +1,4 @@
+import {authorizeAccountTarget} from './department-master.js';
 import {isManager} from './roles.js';
 import {randomUUID} from 'node:crypto';
 import {DocumentStore} from './document-store.js';
@@ -22,7 +23,7 @@ async function exitIdentity(database,uid,{profile,student,offerings,blockers}){
 export async function accountExit({database,client,auth,actor,input={},restoreStudent}){
  const administrator=await database.collection('users').findOne({_id:actor.uid});
  if(!isManager(administrator?.role)||isInactive(administrator))fail('Administrator access required.','permission-denied');
- const action=input.action||'remove';
+ const action=input.action||'remove';if(input.uid)await authorizeAccountTarget(database,actor,await database.collection('users').findOne({_id:input.uid}));
  if(['remove','preview'].includes(action))return accountRemoval({database,client,auth,actor,uid:input.uid,confirmation:input.confirmation,preview:action==='preview'||input.preview===true});
  if(!['student','faculty'].includes(input.kind))fail('Choose student or faculty.');
  const roles=input.kind==='student'?['student']:facultyRoles;
@@ -92,7 +93,7 @@ export async function accountRemoval({database,client,auth,actor,uid,confirmatio
   if(typeof uid!=='string'||! /^[A-Za-z0-9_-]{1,128}$/.test(uid))fail('Select an existing account.');
   async function inspect(session) {
     const options={session},profile=await database.collection('users').findOne({_id:uid},options);
-    if(!profile||!['student',...facultyRoles].includes(profile.role))fail('Only student and employee accounts can be removed.');
+    await authorizeAccountTarget(database,actor,profile);if(!profile||!['student',...facultyRoles].includes(profile.role))fail('Only student and employee accounts can be removed.');
     const student=profile.role==='student'?await database.collection('students').findOne({_id:uid},options):null;
     const offerings=profile.role!=='student'?await database.collection('offerings').find({teacherId:uid,active:{$ne:false}},options).toArray():[];
     const enrollments=profile.role!=='student'?await database.collection('enrollments').countDocuments({teacherId:uid,active:true},options):0;
@@ -101,16 +102,17 @@ export async function accountRemoval({database,client,auth,actor,uid,confirmatio
     const mentees=profile.role==='mentor'?await database.collection('students').countDocuments({mentorId:uid,accountStatus:{$nin:['inactive','deleted','deactivating']}},options):0;
     const blockers=[];
     if(profile.exitOperation==='reactivating')blockers.push('Account reactivation is pending. Finish reactivation before deactivating again.');
+    const departmentWorkflows=await database.collection('departmentWorkflows').find({$or:[{hodId:uid},{officeId:uid},{library:uid},{accounts:uid}]} ,options).toArray();if(departmentWorkflows.length)blockers.push('This employee is assigned in a department workflow. Replace that responsibility first.');
     const workflow=await database.collection('institutionPolicy').findOne({_id:'workflow'},options);
     if(profile.role!=='student'&&Object.values(workflow||{}).includes(uid))blockers.push('This employee is assigned in the current workflow configuration. Reassign that responsibility first.');
-    if(offerings.length)blockers.push('This teacher is assigned to active offerings. Reassign those subjects before deletion.');
+    if(offerings.length)blockers.push('This teacher is assigned to active offerings. Reassign those subjects before deactivation.');
     if(enrollments)blockers.push(`${enrollments} active enrollment mappings still reference this teacher. Reassign or deactivate those mappings first.`);
     if(requests.length)blockers.push(`${requests.length} current No-Due requests still reference this teacher. Resolve or reassign those approvals first.`);
     if(mentees)blockers.push(`${mentees} active mentees still reference this mentor. Reassign them first.`);
     return {profile,student,offerings,blockers};
   }
   if(preview){const details=await inspect();return exitIdentity(database,uid,details);}
-  if(confirmation!=='DELETE')fail('Type DELETE to confirm account deactivation.');
+  if(!['DELETE','DEACTIVATE'].includes(confirmation))fail('Type DEACTIVATE to confirm account deactivation.');
   const session=client.startSession();let completedRemoval=false;
   try {await session.withTransaction(async()=>{
     completedRemoval=false;
