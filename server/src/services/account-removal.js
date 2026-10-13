@@ -31,12 +31,12 @@ export async function accountExit({database,client,auth,actor,input={},restoreSt
   const query={role:{$in:roles},[value.includes('@')?'email':input.kind==='student'?'usn':'facultyId']:value};
   let profiles;if(input.kind==='student'&&!value.includes('@')){const students=await database.collection('students').find({usn:value}).collation({locale:'en',strength:2}).limit(2).toArray();profiles=await database.collection('users').find({_id:{$in:students.map(s=>s._id)},role:'student'}).toArray();}
   else profiles=await database.collection('users').find(query).collation({locale:'en',strength:2}).limit(2).toArray();
-  if(profiles.length>1)fail('Identity is ambiguous; resolve duplicate records before exit management.','failed-precondition');
+  if(actor.managementDepartmentId)profiles=profiles.filter(p=>p.departmentId===actor.managementDepartmentId);if(profiles.length>1)fail('Identity is ambiguous; resolve duplicate records before exit management.','failed-precondition');
   return {account:profiles.length?await accountRemoval({database,client,auth,actor,uid:profiles[0]._id,preview:true}):null};
  }
  if(['directory','export'].includes(action)){
   const status=input.status||'active';if(!['active','inactive','all'].includes(status))fail('Choose Active, Inactive or All.');
-  const filter={role:{$in:roles}};if(status!=='all')filter.accountStatus=status==='active'?{$nin:['inactive','deleted','deactivating']}:{$in:['inactive','deleted','deactivating']};
+  const filter={role:{$in:roles},...(actor.managementDepartmentId?{departmentId:actor.managementDepartmentId}:{})};if(status!=='all')filter.accountStatus=status==='active'?{$nin:['inactive','deleted','deactivating']}:{$in:['inactive','deleted','deactivating']};
   if(input.cursor){if(!/^[A-Za-z0-9_-]{1,128}$/.test(input.cursor))fail('Invalid directory cursor.');filter._id={$gt:input.cursor};}
   const maximum=action==='export'?10001:51,profiles=await database.collection('users').find(filter).sort({_id:1}).limit(maximum).toArray();
   if(action==='export'&&profiles.length>10000)fail('Export exceeds 10,000 accounts; use a smaller directory scope.');

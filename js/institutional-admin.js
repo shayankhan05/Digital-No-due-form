@@ -1,3 +1,4 @@
+import {mountDepartmentManagement} from './department-management.js';
 import {departmentLabel} from './department.js';
 import {wireAccountRemoval,wireAccountReactivation,mountExitManagement} from './account-removal.js';
 import {requireAuth,wireLogout} from './auth.js';
@@ -99,6 +100,7 @@ async function render() {
     const policy=await api('policy'),form=document.getElementById('policyForm');if(form){for(const key of ['allowedDomains','departments','schemes','sections']) form.elements[key].value=(key==='departments'?policy[key].map(v=>departmentLabel(v)):policy[key]).join(', ');for(const key of ['smtpHost','smtpPort','smtpUser','mailFrom']) form.elements[key].value=policy[key] || '';
     if(isEmulator && !form.elements.allowedDomains.value) form.elements.allowedDomains.value='demo.test';}
     const mentors=await page('users',[['role','==','mentor']],null,100);document.getElementById('mentorOptions').innerHTML=mentors.rows.map(m=>`<option value="${e(m.email)}">${e(m.name)} · ${e(m.facultyId)}</option>`).join('');
+    await mountDepartmentManagement(actor);
   } catch(error) {(document.getElementById('policyStatus')||document.getElementById('accountStatus')).textContent=`Account management unavailable: ${error.message}. Start the Functions emulator or deploy the backend. Existing workflows remain available through Advanced record editing.`;}
 }
 function showPreview() {

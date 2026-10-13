@@ -1,3 +1,4 @@
+import {assertDepartment} from './department-master.js';
 import {isInactive} from './account-removal.js';
 import {isManager} from './roles.js';
 import {compareUSN} from '../../../js/marks-roster.js';
@@ -30,7 +31,7 @@ function schema(o){
  return {columns,aliases,exact:new Map([...base,...columns.map(c=>c.header)].map(key=>[key,key]))};
 }
 export async function marksRoster(store,actor,id,{allowManager=false}={}){
- if(!/^[A-Za-z0-9_-]{1,200}$/.test(id))fail('Invalid offering.');const o=(await store.doc(`offerings/${id}`).get()).data();
+ if(!/^[A-Za-z0-9_-]{1,200}$/.test(id))fail('Invalid offering.');const o=(await store.doc(`offerings/${id}`).get()).data();if(o)await assertDepartment(store,actor,'offerings',o);
  if(!o||o.active===false||!(allowManager&&isManager(actor.role))&&(!['subject_faculty','mentor'].includes(actor.role)||o.teacherId!==actor.uid))fail('Only the assigned teacher may manage this offering.','permission-denied');
  const enrollments=await store.collection('enrollments').where('offeringId','==',id).where('teacherId','==',o.teacherId).where('active','==',true).get(),ids=enrollments.docs.map(d=>d.data().studentId);
  const students=ids.length?(await store.collection('students').where('__name__','in',ids).get()).docs:[],byId=new Map(students.filter(d=>!isInactive(d.data())).map(d=>[d.id,d.data()])),marks=await store.collection('marks').where('offeringId','==',id).get(),scores=new Map(marks.docs.map(d=>[d.id,d.data()]));

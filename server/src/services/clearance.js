@@ -6,7 +6,7 @@ export const REQUIRED_SERVICES=['library','accounts'];
 const text=v=>String(v ?? '').trim();
 const department=v=>departmentCode(v).toLowerCase();
 export function matchesStudent(student,offering) {
-  return !isInactive(student) && offering.active!==false && Number(offering.semester)===Number(student.semester)
+  return (!student.departmentId||!offering.departmentId||student.departmentId===offering.departmentId) && !isInactive(student) && offering.active!==false && Number(offering.semester)===Number(student.semester)
     && text(offering.section).toUpperCase()===text(student.section).toUpperCase()
     && (!text(offering.department) || department(offering.department)===department(student.department))
     && (!text(offering.scheme) || text(offering.scheme)===text(student.scheme));
@@ -18,8 +18,9 @@ export function subjectItem(uid,student,offering,teacher) {
     department:student.department || offering.department || '',scheme:text(student.scheme || offering.scheme),
     semester:Number(student.semester),section:text(student.section).toUpperCase()};
 }
+export async function workflowFor(db,student){if(student?.departmentId){const specific=(await db.doc('departmentWorkflows/'+student.departmentId).get()).data();if(specific)return specific;const master=(await db.doc('departments/'+student.departmentId).get()).data();if(master&&master.code!=='ISE')return null;}return (await db.doc('settings/workflow').get()).data();}
 export async function enrollmentPlan(db,uid) {
-  const student=(await db.doc(`students/${uid}`).get()).data(),config=(await db.doc('settings/workflow').get()).data();
+  const student=(await db.doc(`students/${uid}`).get()).data(),config=await workflowFor(db,student);
   if(!student || !config) throw new Error('Student profile and workflow assignments are required.');
   const enrolled=await db.collection('enrollments').where('studentId','==',uid).where('active','==',true).get();
   const items={};

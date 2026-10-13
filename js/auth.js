@@ -1,3 +1,4 @@
+import {mountDepartmentContext} from './department-management.js';
 import { auth, db } from "./firebase-config.js";
 import {
   signInWithEmailAndPassword,
@@ -58,7 +59,7 @@ export function requireAuth(roles = null,{allowPasswordChange=false}={}) {
         window.location.href = ROLE_HOME[profile.role] || "login.html";
         return;
       }
-      resolve(profile);
+      await mountDepartmentContext(profile).catch(()=>{});resolve(profile);
       if (!allowPasswordChange) showPasswordReminder(profile);
       } catch (error) { reject(error); }
     });
@@ -163,5 +164,5 @@ function friendlyAuthError(code) {
 
 export async function signOutAndClear(){
   await signOut(auth);
-  for(const key of Object.keys(sessionStorage))if(key.startsWith('temporary-password-reminder:')||key.startsWith('noDueSubmitKey:'))sessionStorage.removeItem(key);
+  for(const key of Object.keys(sessionStorage))if(key.startsWith('temporary-password-reminder:')||key.startsWith('noDueSubmitKey:')||key.startsWith('department-context:'))sessionStorage.removeItem(key);
 }
