@@ -1731,3 +1731,21 @@ body.dark .manual-marks-table thead th { background: #0d0d0d; }
 .exit-dialog { max-height: calc(100dvh - 32px); overflow-y: auto; box-sizing: border-box; }
 #exitDirectory td { overflow-wrap: anywhere; }
 #exitDirectory td .btn-sm { margin: 4px; }
+
+/* Compact multi-choice dropdowns; native selects retain submission/validation. */
+.multi-picker { min-width: 0; margin-bottom: 14px; }
+.multi-picker-label { display: block; font-size: 13px; color: var(--text-muted); }
+.multi-picker summary { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 10px; margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--white); color: var(--text); cursor: pointer; list-style: none; }
+.multi-picker summary::-webkit-details-marker { display: none; }
+.multi-picker summary:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+.multi-picker-values { display: flex; flex: 1; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.multi-picker-chip { padding: 2px 8px; border-radius: 6px; background: var(--gray-bg); color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.multi-picker-arrow { flex: 0 0 8px; height: 8px; margin-right: 4px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); }
+.multi-picker details[open] .multi-picker-arrow { transform: rotate(225deg); }
+.multi-picker-panel { padding: 10px; margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--white); color: var(--text); }
+.multi-picker-options { max-height: 240px; overflow-y: auto; margin-bottom: 8px; }
+.multi-picker-options label { display: flex; align-items: center; gap: 10px; padding: 8px 4px; color: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.multi-picker-options input { width: auto; flex: 0 0 auto; margin: 0; accent-color: var(--navy); }
+.multi-picker-error { color: var(--red-text); font-size: 13px; }
+html[data-theme="dark"] .multi-picker summary,
+html[data-theme="dark"] .multi-picker-panel { background: #101010; color: #fff; border-color: #333; }
