@@ -1749,3 +1749,30 @@ body.dark .manual-marks-table thead th { background: #0d0d0d; }
 .multi-picker-error { color: var(--red-text); font-size: 13px; }
 html[data-theme="dark"] .multi-picker summary,
 html[data-theme="dark"] .multi-picker-panel { background: #101010; color: #fff; border-color: #333; }
+
+/* Super Admin reveals the requested workspace only after initialization. */
+body.super-admin-page .app-shell { width: 100%; max-width: 1500px !important; margin-inline: auto; }
+.super-admin-page:not(.workspace-ready) .department-scroll { display: none; }
+.super-admin-page.workspace-ready #superWorkspaceLoading { display: none; }
+.super-admin-page #superWorkspaceLoading { flex: 1; display: grid; place-content: center; }
+.super-admin-page [hidden] { display: none !important; }
+.super-admin-page #departmentContext { width: calc(100% - 48px); max-width: 1452px !important; }
+.super-admin-page #content, .super-admin-page #superManagement, .super-admin-page [data-super-section] { min-width: 0; width: 100%; }
+.super-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.super-tabs a { padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); text-decoration: none; }
+.super-tabs a[aria-current="page"] { background: var(--gray-bg); font-weight: 600; }
+.super-admin-page :is(#departmentForm, #schemeForm, #sectionForm, #departmentWorkflowForm, #policyForm, #accountForm, #initialAdminFields) { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 20px; align-items: start; min-width: 0; }
+.super-admin-page :is(#initialAdminFields, #sectionForm) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.super-admin-page form > :is(fieldset, p, button), .super-admin-page #policyForm > label { grid-column: 1 / -1; }
+.super-admin-page form > button { justify-self: start; width: auto; }
+.super-admin-page form label { min-width: 0; }
+.super-admin-page .email-config { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 8px; }
+.super-admin-page .email-config p { grid-column: 1 / -1; margin: 0; }
+@media (min-width: 601px) and (max-width: 1000px) {
+ .super-admin-page :is(#departmentForm, #schemeForm, #departmentWorkflowForm, #policyForm, #accountForm) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+ .super-admin-page #departmentContext { width: calc(100% - 32px); }
+ .super-admin-page :is(#departmentForm, #schemeForm, #sectionForm, #departmentWorkflowForm, #policyForm, #accountForm, #initialAdminFields, .email-config) { grid-template-columns: 1fr; }
+ .super-tabs a { flex: 1 1 140px; text-align: center; }
+}

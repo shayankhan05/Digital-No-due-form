@@ -1,3 +1,4 @@
+import {assertUniqueDepartment,departmentNameKey} from './department-uniqueness.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {createProvisioner} from './provisioning.js';
 import {DocumentStore} from './document-store.js';
@@ -15,8 +16,7 @@ export async function createDepartmentWithAdmin({database,client,auth,demo,actor
  if(!/^[A-Z0-9_-]{1,30}$/.test(code)||!name||name.length>150||!['active','inactive'].includes(input.status))fail('Valid department name, code and status are required.');
  if(!/^[A-Za-z0-9_-]{8,100}$/.test(requestId||''))fail('A stable department request ID is required.');
  const jobId=hash(actor.uid+':'+requestId),id='dept_'+jobId.slice(0,32),job=await database.collection('departmentProvisioningJobs').findOne({_id:jobId});
- const collision=await database.collection('departments').findOne({$or:[{codeKey:code.toLowerCase()},{nameKey:name.toLowerCase().replace(/\s+/g,' ')}]});
- if(collision&&collision._id!==id)fail('Department code or name already exists.','already-exists');
+ await assertUniqueDepartment(database,{code,name,id});
  const admin=input.initialAdmin||{},email=String(admin.email||'').trim().toLowerCase(),employeeId=String(admin.employeeId||'').trim().toUpperCase();
  if(!String(admin.name||'').trim()||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!/^[A-Z0-9_-]{1,80}$/.test(employeeId))fail('Initial Admin name, college email and employee ID are required.');
  const schemeIds=[...new Set(input.schemeIds||[])],sections=[...new Set((input.sections||[]).map(v=>String(v).trim().toUpperCase()))];
@@ -31,9 +31,9 @@ export async function createDepartmentWithAdmin({database,client,auth,demo,actor
  const existing=await database.collection('users').findOne({$or:[{email},{facultyId:employeeId}]});if(existing&&existing._id!==expectedUid)fail('Initial Admin identity already belongs to an existing account.','already-exists');
  try{const existingAuth=await auth.getUserByEmail(email);if(existingAuth.uid!==expectedUid)fail('Admin email already belongs to another Firebase identity.','already-exists');}catch(e){if(e.code!=='auth/user-not-found')throw e;}
  const session=client.startSession();try{await session.withTransaction(async()=>{
-  const previous=await database.collection('departmentProvisioningJobs').findOne({_id:jobId},{session});if(previous&&previous.digest!==digest)fail('Department operation conflict.');
+  await assertUniqueDepartment(database,{code,name,id,session});const previous=await database.collection('departmentProvisioningJobs').findOne({_id:jobId},{session});if(previous&&previous.digest!==digest)fail('Department operation conflict.');
   await database.collection('departmentProvisioningJobs').updateOne({_id:jobId},{$setOnInsert:{actorUid:actor.uid,digest,departmentId:id,expectedAdminUid:expectedUid,state:'reserved',createdAt:new Date(),retryInput:{code,name,status:input.status,requestId,schemeIds,sections,initialAdmin:{name:admin.name,email,employeeId,phone:String(admin.phone||'')}}}},{upsert:true,session});
-  await database.collection('departments').updateOne({_id:id},{$setOnInsert:{code,name,codeKey:code.toLowerCase(),nameKey:name.toLowerCase().replace(/\s+/g,' '),status:'provisioning',createdAt:new Date(),updatedAt:new Date(),schemeIds,sections}},{upsert:true,session});
+  await database.collection('departments').updateOne({_id:id},{$setOnInsert:{code,name,codeKey:code.toLowerCase(),nameKey:departmentNameKey(name),status:'provisioning',createdAt:new Date(),updatedAt:new Date(),schemeIds,sections}},{upsert:true,session});
  });}finally{await session.endSession();}
  try{
   const provisioner=provisionerFactory?provisionerFactory({departmentBootstrap:{id,code}}):createProvisioner({db:new DocumentStore(database,client),auth,demo,departmentBootstrap:{id,code}});
