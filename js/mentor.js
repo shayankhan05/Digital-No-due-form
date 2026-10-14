@@ -5,6 +5,7 @@ import { db } from "./firebase-config.js";
 import { requireAuth, wireLogout } from "./auth.js";
 import { actAsMentor, STATUS } from "./workflow.js";
 import { initThemeToggle } from "./theme.js";
+import {apiFetch} from './api.js';
 
 import {
   collection,
@@ -29,6 +30,9 @@ const profileNav = document.getElementById("profileNav");
 
 let currentMentor = null;
 let mentees = [];
+let menteeCursor = null;
+let moreMentees = false;
+let loadingMentees = false;
 let pendingRequests = [];
 let unsubscribeRequests;
 window.addEventListener("pagehide", () => unsubscribeRequests?.());
@@ -306,9 +310,13 @@ function showDashboard() {
 
     </div>
 
+    ${moreMentees ? '<button id="loadMoreMentees" class="btn-sm">Load more mentees</button>' : ''}
+
   `;
 
   wireRequestActions();
+  const more = content.querySelector('#loadMoreMentees');
+  if (more) more.onclick = () => { more.disabled = true; loadMentees(true); };
 
 }
 
@@ -460,7 +468,7 @@ function listenForPendingRequests() {
       "status",
       "==",
       STATUS.PENDING_MENTOR
-    ), limit(30)
+    ), limit(100)
 
   );
 
@@ -513,25 +521,20 @@ function listenForPendingRequests() {
    LOAD MENTEES
 ========================================================= */
 
-async function loadMentees() {
+async function loadMentees(append = false) {
 
-  if (!currentMentor) return;
+  if (!currentMentor || loadingMentees) return;
+  loadingMentees = true;
 
 
   try {
 
-    const snapshot =
-      await getDocs(
-        query(collection(db, "students"), where("mentorId", "==", currentMentor.uid), limit(30))
-      );
+    const page = await apiFetch('/api/academic/mentees?limit=30' + (append && menteeCursor ? '&cursor=' + encodeURIComponent(menteeCursor) : ''));
+    menteeCursor = page.cursor;
+    moreMentees = page.more;
 
 
-    mentees =
-      snapshot.docs
-        .map((document) => ({
-          id: document.id,
-          ...document.data()
-        }))
+    mentees = [...(append ? mentees : []), ...page.rows]
         .filter((student) => {
 
           /*
@@ -597,7 +600,11 @@ async function loadMentees() {
       Firestore rules prevent students access.
     */
 
-    mentees = [];
+    if (!append) mentees = [];
+    const more = content.querySelector('#loadMoreMentees');
+    if (more) more.disabled = false;
+  } finally {
+    loadingMentees = false;
 
   }
 

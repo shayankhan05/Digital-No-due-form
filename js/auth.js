@@ -1,3 +1,4 @@
+import {hasRole,isMentor} from './capabilities.js';
 import {mountDepartmentContext} from './department-management.js';
 import { auth, db } from "./firebase-config.js";
 import {
@@ -55,11 +56,11 @@ export function requireAuth(roles = null,{allowPasswordChange=false}={}) {
         window.location.href = "login.html";
         return;
       }
-      if (roles && !roles.includes(profile.role)) {
+      if (roles && !hasRole(profile,roles)) {
         window.location.href = ROLE_HOME[profile.role] || "login.html";
         return;
       }
-      await mountDepartmentContext(profile).catch(()=>{});resolve(profile);
+      await mountDepartmentContext(profile).catch(()=>{});if(isMentor(profile)&&profile.role==='subject_faculty'&&!document.getElementById('mentorCapabilityLink')){const a=document.createElement('a');a.id='mentorCapabilityLink';a.className='btn-sm';a.href='mentor-dashboard.html';a.textContent='My mentees';document.getElementById('logoutBtn')?.parentNode.append(a);}resolve(profile);
       if (!allowPasswordChange) showPasswordReminder(profile);
       } catch (error) { reject(error); }
     });

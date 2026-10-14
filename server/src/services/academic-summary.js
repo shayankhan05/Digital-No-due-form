@@ -1,0 +1,13 @@
+import {canRead} from './authorization.js';
+import {isMentor} from '../../../js/capabilities.js';
+import {matchesStudent} from './clearance.js';
+const clean=row=>{if(!row)return null;const {_id,__parent,...data}=row;return {...data,id:_id};};
+export async function academicSummary(store,actor,uid){
+ if(!/^[A-Za-z0-9_-]{1,128}$/.test(uid))throw Error('Invalid student.');const db=store.database,s=await db.collection('students').findOne({_id:uid});if(!s||!await canRead(store,actor,'students/'+uid,s))throw Object.assign(Error('Not your student record.'),{code:'permission-denied'});
+ const enrolled=await db.collection('enrollments').find({studentId:uid,active:true}).limit(31).toArray();if(enrolled.length>30)throw Error('Student has more than 30 active offerings; review academic mappings.');const ids=enrolled.map(e=>e.offeringId),[offerings,marks,assignments]=await Promise.all([db.collection('offerings').find({_id:{$in:ids}}).toArray(),db.collection('marks').find({_id:{$in:enrolled.map(e=>e._id)}}).toArray(),db.collection('assignments').find({offeringId:{$in:ids}}).sort({_id:1}).toArray()]),people=await db.collection('users').find({_id:{$in:[s.mentorId,...offerings.map(o=>o.teacherId)].filter(Boolean)}}).toArray(),byId=rows=>new Map(rows.map(r=>[r._id,r])),o=byId(offerings),m=byId(marks),u=byId(people);
+ return{student:{...clean(s),uid},mentor:clean(u.get(s.mentorId)),subjects:enrolled.filter(e=>o.has(e.offeringId)&&matchesStudent(s,o.get(e.offeringId))&&e.teacherId===o.get(e.offeringId).teacherId).map(e=>({enrollment:clean(e),offering:clean(o.get(e.offeringId)),teacher:clean(u.get(e.teacherId)),marks:clean(m.get(e._id)),assignments:assignments.filter(a=>a.offeringId===e.offeringId).slice(0,50).map(clean)}))};
+}
+export async function menteePage(store,actor,{cursor='',limit=30}={}){
+ if(!isMentor(actor))throw Object.assign(Error('Mentor capability required.'),{code:'permission-denied'});const size=Math.min(100,Math.max(1,Number(limit)||30));if(cursor&&!/^[A-Za-z0-9_-]{1,128}$/.test(cursor))throw Error('Invalid cursor.');const rows=await store.database.collection('students').find({mentorId:actor.uid,accountStatus:{$nin:['inactive','deleted','deactivating','deleting']},...(actor.departmentId?{departmentId:actor.departmentId}:{}),...(cursor?{_id:{$gt:cursor}}:{})}).sort({_id:1}).limit(size+1).toArray(),page=rows.slice(0,size),requests=await store.database.collection('noDueRequests').find({mentorId:actor.uid,studentId:{$in:page.map(s=>s._id)}}).sort({createdAt:-1}).toArray(),latest=new Map();for(const r of requests)if(!latest.has(r.studentId))latest.set(r.studentId,r.status);
+ return{rows:page.map(s=>({...clean(s),clearance:latest.get(s._id)||'Not submitted'})),cursor:page.at(-1)?._id||null,more:rows.length>size};
+}

@@ -1,3 +1,4 @@
+import {isMentor} from '../../../js/capabilities.js';
 import {departmentCode} from '../../../js/department.js';
 import {isInactive} from './account-removal.js';
 import {FieldValue} from './values.js';
@@ -41,7 +42,7 @@ export async function enrollmentPlan(db,uid) {
     items[type]={approverType:type,approverId:config[type],label:type,subjectCode:null,offeringId:null};
   }
   for(const [id,role] of [[student.mentorId,'mentor'],[config.hodId,'hod'],[config.officeId,'office']]) {
-    if(!id || (await db.doc(`users/${id}`).get()).data()?.role!==role) throw new Error(`Configure the assigned ${role}.`);
+    const person=id&&(await db.doc(`users/${id}`).get()).data();if(!person||isInactive(person)||(role==='mentor'?!isMentor(person):person.role!==role)) throw new Error(`Configure the assigned ${role}.`);
   }
   return {valid:true,workflowVersion:3,items,initialStates:Object.fromEntries(Object.keys(items).map(id=>[id,'pending'])),
     approverIds:[...new Set(Object.values(items).map(item=>item.approverId))],mentorId:student.mentorId,

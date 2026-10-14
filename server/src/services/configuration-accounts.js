@@ -6,9 +6,7 @@ export function eligibleConfigurationAccount(user){
 // Resolve the existing institution policy; never select the first of ambiguous users.
 export async function institutionServices(database){
  const policy=await database.collection('institutionPolicy').findOne({_id:'workflow'})||{},configs=await database.collection('departmentWorkflows').find({}).toArray(),result={};
- for(const[field,role]of Object.entries(serviceFields)){
-  const ids=[...new Set(configs.map(c=>c[field]).filter(Boolean))],uid=policy[field]||(ids.length===1?ids[0]:null),user=uid&&await database.collection('users').findOne({_id:uid,role});
-  result[field]=user&&!isInactive(user)&&user.authDisabled!==true&&user.scope==='institution'&&user.configurationSelectable!==false?{uid:user._id,role,name:user.name,email:user.email}:null;
- }
+ const selected=Object.fromEntries(Object.keys(serviceFields).map(field=>{const ids=[...new Set(configs.map(c=>c[field]).filter(Boolean))];return[field,policy[field]||(ids.length===1?ids[0]:null)];})),users=new Map((await database.collection('users').find({_id:{$in:Object.values(selected).filter(Boolean)}}).toArray()).map(u=>[u._id,u]));
+ for(const[field,role]of Object.entries(serviceFields)){const user=users.get(selected[field]);result[field]=user&&user.role===role&&!isInactive(user)&&user.authDisabled!==true&&user.scope==='institution'&&user.configurationSelectable!==false?{uid:user._id,role,name:user.name,email:user.email}:null;}
  return result;
 }

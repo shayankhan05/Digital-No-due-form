@@ -11,5 +11,5 @@ export function accountLabel(account,peers=[]){
  return base+(index>0?' '+(index+1):'');
 }
 
-const auditLabels={ACCOUNT_BULK_DEACTIVATED:'Account Deactivated',ACCOUNT_BULK_REACTIVATED:'Account Reactivated',HOD_REPLACED:'HOD Changed',HOD_ASSIGNED:'HOD Assigned',DEPARTMENT_ADMIN_REPLACED:'Department Admin Changed',DEPARTMENT_CREATED:'Department Created',DEPARTMENT_ADMIN_CREATED:'Department Admin Created',SECTION_CREATED:'Section Created',SECTION_ACTIVATED:'Section Activated',SECTION_DEACTIVATED:'Section Deactivated'};
+const auditLabels={BULK_STUDENT_IMPORT:'Student CSV Import',BULK_FACULTY_IMPORT:'Faculty CSV Import',BULK_SUBJECT_IMPORT:'Subject CSV Import',BULK_ASSIGNMENT_IMPORT:'Class Assignment CSV Import',ACCOUNT_BULK_DELETED:'Accounts Permanently Removed',ACCOUNT_BULK_DEACTIVATED:'Account Deactivated',ACCOUNT_BULK_REACTIVATED:'Account Reactivated',HOD_REPLACED:'HOD Changed',HOD_ASSIGNED:'HOD Assigned',DEPARTMENT_ADMIN_REPLACED:'Department Admin Changed',DEPARTMENT_CREATED:'Department Created',DEPARTMENT_ADMIN_CREATED:'Department Admin Created',SECTION_CREATED:'Section Created',SECTION_ACTIVATED:'Section Activated',SECTION_DEACTIVATED:'Section Deactivated'};
 export const auditActionLabel=action=>auditLabels[action]||String(action||'').toLowerCase().replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());

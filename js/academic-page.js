@@ -1,3 +1,4 @@
+import {isMentor} from './capabilities.js';
 import {compareUSN,rosterMatches} from './marks-roster.js';
 import {apiFetch} from './api.js';
 import {departmentLabel} from './department.js';
@@ -12,13 +13,13 @@ import {mountMarksCSV} from './marks-csv.js';
 wireLogout(); initThemeToggle();
 const content = document.getElementById("content");
 let actor, cursor, rows = [], classLoadVersion = 0;
-window.addEventListener("hashchange", () => { if (actor?.role === "mentor" && location.hash === "#teaching") listClasses().catch(error => errorState(content,error)); });
+window.addEventListener("hashchange", () => { if (isMentor(actor) && location.hash === "#teaching") listClasses().catch(error => errorState(content,error)); });
 requireAuth(["student", "subject_faculty", "mentor", "admin", "super_admin"]).then(async profile => {
   actor = profile;
   document.getElementById("backLink").href = ({ student: "student-dashboard.html", subject_faculty: "approver-dashboard.html", mentor: "mentor-dashboard.html", admin: "admin-dashboard.html", super_admin: "super-admin-dashboard.html" })[actor.role];
   const uid = new URLSearchParams(location.search).get("student");
   if (actor.role === "student" || uid) return showStudent(actor.role === "student" ? actor.uid : uid);
-  if (actor.role === "mentor" && location.hash !== "#teaching") return listMentees();
+  if ((actor.role==='mentor'||isMentor(actor)&&location.hash==='#mentees') && location.hash !== "#teaching") return listMentees();
   return listClasses();
 }).catch(error => errorState(content, error));
 async function showStudent(uid) {
@@ -27,9 +28,7 @@ async function showStudent(uid) {
   content.innerHTML = `${academicHTML(details)}<div class="card"><h2>No-Due history</h2>${requests.empty ? "No requests yet." : requests.docs.map(d => `<h3>${e(d.data().status)}</h3>${approvalHTML(d.data())}`).join("")}</div>`;
 }
 async function listMentees(append = false) {
-  const result = await page("students", [["mentorId", "==", actor.uid]], append ? cursor : null);
-  cursor = result.cursor; rows = append ? [...rows, ...result.rows] : result.rows;
-  const summaries = await Promise.all(rows.map(async s => { const snap = await getDocs(query(collection(db,"noDueRequests"),where("studentId","==",s.id),where("mentorId","==",actor.uid),orderBy("createdAt","desc"),limit(1))); return {...s,clearance:snap.docs[0]?.data().status || "Not submitted"}; }));
+  const result=await apiFetch('/api/academic/mentees?limit=30'+(append&&cursor?'&cursor='+encodeURIComponent(cursor):''));cursor=result.cursor;rows=append?[...rows,...result.rows]:result.rows;const summaries=rows;
   content.innerHTML = `${profileHTML(actor)}<a href="academic.html#teaching">My teaching classes & marks</a><div class="card"><h2>My mentees</h2>${summaries.map(s => `<div class="row"><span>${e(s.name)} · ${e(s.usn)}<br>Semester ${e(s.semester)} · Section ${e(s.section)}<br>No-Due: ${e(s.clearance)}</span><a href="academic.html?student=${encodeURIComponent(s.id)}">View details</a></div>`).join("") || "No mentees assigned."}</div>${result.more ? '<button id="more" class="btn-sm">Load more mentees</button>' : ""}`;
   document.getElementById("more")?.addEventListener("click", event => busy(event.target, () => listMentees(true)));
 }

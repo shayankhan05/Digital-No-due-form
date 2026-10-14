@@ -1,3 +1,4 @@
+import {isMentor} from '../../../js/capabilities.js';
 import {sectionMaster} from './section-master.js';
 import {departmentCode} from '../../../js/department.js';
 import {isManager} from './roles.js';
@@ -44,19 +45,19 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     if(text(row.mentorId)) {
       if(!/^[A-Za-z0-9_-]{1,128}$/.test(text(row.mentorId))) fail('Invalid mentor ID.');
       const data=snapshotData(await db.doc(`users/${text(row.mentorId)}`).get());
-      if(data?.role!=='mentor') fail('Mentor does not exist.');
+      if(!isMentor(data)||isInactive(data)) fail('Mentor does not exist.');
       results.push(data);
     }
-    if(text(row.mentorEmail)) results.push(await resolve('email',row.mentorEmail,['mentor']));
-    if(text(row.mentorEmployeeId)) results.push(await resolve('facultyId',row.mentorEmployeeId,['mentor']));
-    if(!results.length) fail('Provide mentorEmail, mentorEmployeeId or mentorId.');
+    if(text(row.mentorEmail)) results.push(await resolve('email',row.mentorEmail,['mentor','subject_faculty']));
+    if(text(row.mentorEmployeeId)) results.push(await resolve('facultyId',row.mentorEmployeeId,['mentor','subject_faculty']));
+    if(!results.length) fail('Provide mentorEmail, mentorEmployeeId or mentorId.');if(results.some(m=>!isMentor(m)||isInactive(m)))fail('Mentor must be an active eligible faculty/mentor account.');
     if(results.some(m=>m.uid!==results[0].uid)) fail('Mentor identifiers refer to different accounts.');
     if(results[0].scope==='department'&&canonicalDepartment(results[0].department)!==row.department)fail('Mentor belongs to another department.');return results[0];
   }
   function normalize(input,p) {
     const row={role:'student',...input};
     row.name=text(row.name);row.collegeEmail=email(row.collegeEmail || row.email);row.department=canonicalDepartment(row.department,p.departmentAliases);
-    row.scope=['admin','student','subject_faculty','mentor','hod'].includes(row.role)?'department':row.scope==='department'?'department':'institution';row.phone=text(row.phone);row.scheme=text(row.scheme);row.facultyId=text(row.facultyId || row.employeeId).toUpperCase();
+    row.scope=['admin','student','subject_faculty','mentor','hod'].includes(row.role)?'department':row.scope==='department'?'department':'institution';if(row.isMentor!==undefined){if(![true,false,'true','false'].includes(row.isMentor))fail('is_mentor must be true or false.');row.isMentor=row.isMentor===true||row.isMentor==='true';if(row.isMentor&&!['subject_faculty','mentor'].includes(row.role))fail('Only faculty can have mentor capability.');}row.phone=text(row.phone);row.scheme=text(row.scheme);row.facultyId=text(row.facultyId || row.employeeId).toUpperCase();
     if(!roles.includes(row.role)) fail('Unsupported role.');
     if(!row.name || row.name.length>150) fail('Name is required (maximum 150 characters).');
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.collegeEmail)) fail('Valid college email is required.');
@@ -92,12 +93,13 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     return result;
   }
   async function duplicate(field,value,collection,uid) {
+    if(db.snapshot)return (db.snapshot[collection]||[]).some(d=>String(d[field]??'').toLowerCase()===String(value).toLowerCase()&&d._id!==uid);
     if(db.database){const rows=await db.database.collection(collection).find({[field]:value}).collation({locale:'en',strength:2}).limit(2).toArray();return rows.some(d=>d._id!==uid);}
     const result=await db.collection(collection).where(field,'==',value).limit(2).get();
     return result.docs.some(d=>d.id!==uid);
   }
   async function inactiveIdentity(row) {
-    if(!db.database)return;
+    if(db.snapshot){const candidates=(db.snapshot.users||[]).filter(u=>email(u.email)===row.collegeEmail||row.role!=='student'&&text(u.facultyId).toUpperCase()===row.facultyId);if(row.role==='student')for(const s of db.snapshot.students||[])if(text(s.usn).toUpperCase()===row.usn){const u=db.snapshot.users.find(u=>u._id===s._id);if(u)candidates.push(u);}const inactive=candidates.find(isInactive);if(inactive)throw Object.assign(new HttpsError('failed-precondition','This identity already exists but is inactive. Explicitly Reactivate existing account before import.'),{inactiveUid:inactive._id});return;}if(!db.database)return;
     const criteria=[{email:row.collegeEmail}];if(row.role!=='student'&&row.facultyId)criteria.push({facultyId:row.facultyId});
     const found=await db.database.collection('users').find({$or:criteria}).collation({locale:'en',strength:2}).toArray();
     if(row.role==='student'&&row.usn){for(const student of await db.database.collection('students').find({usn:row.usn}).collation({locale:'en',strength:2}).toArray()){const user=await db.database.collection('users').findOne({_id:student._id});if(user)found.push(user);}}
@@ -189,7 +191,7 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
   async function validateTeacher(input,p) {
     if(!input || !staffRoles.includes(text(input.role))) fail('An institutional staff role is required; use subject_faculty for teaching accounts.');
     if(!text(input.employeeId)) fail('Employee ID is required.');
-    const safe={name:input.name,collegeEmail:input.collegeEmail,phone:input.phone,department:input.department,facultyId:input.employeeId,role:text(input.role)};
+    const safe={...(input.isMentor!==undefined?{isMentor:input.isMentor}:{}),name:input.name,collegeEmail:input.collegeEmail,phone:input.phone,department:input.department,facultyId:input.employeeId,role:text(input.role)};
     const normalized=normalize(safe,p || await policy());
     await inactiveIdentity(normalized);
     let existing;try {existing=await auth.getUserByEmail(normalized.collegeEmail);}catch(error){if(error.code!=='auth/user-not-found')throw error;}
@@ -208,7 +210,7 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
       }
     }
     const {row}=await validate(safe,{uid:existing?.uid,p});
-    return {row:{name:row.name,collegeEmail:row.collegeEmail,phone:row.phone,department:row.department,employeeId:row.facultyId,role:row.role},uid:existing?.uid || row.existingUid,authMissing:!existing,pendingCaller};
+    return {row:{...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,collegeEmail:row.collegeEmail,phone:row.phone,department:row.department,employeeId:row.facultyId,role:row.role},uid:existing?.uid || row.existingUid,authMissing:!existing,pendingCaller};
   }
   async function previewTeachers(inputs) {
     if(!Array.isArray(inputs) || inputs.length<1 || inputs.length>100) fail('Preview 1–100 teacher rows per chunk.');
@@ -241,10 +243,10 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     }
     const uid=checked.uid,ref=db.doc(`users/${uid}`),keys=[['email',row.collegeEmail],['facultyId',row.employeeId]].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
     await db.runTransaction(async t=>{
-      const [profile,...identities]=await Promise.all([t.get(ref),...keys.map(key=>t.get(key))]);
+      const [profile,...identities]=await Promise.all([t.get(ref),...keys.map(key=>t.get(key))]);if(row.isMentor===false&&profile.data()?.isMentor&&!(await t.get(db.collection('students').where('mentorId','==',uid).limit(1))).empty)fail('Reassign mentees before removing mentor capability.');
       if(profile.data()?.role!==row.role || text(profile.data()?.facultyId).toUpperCase()!==row.employeeId || email(profile.data()?.email)!==row.collegeEmail || identities.some(s=>s.exists&&s.data().uid!==uid)) fail('Institutional identity changed; validate the teacher CSV again.','already-exists');
       for(const key of keys)t.set(key,{uid},{merge:true});
-      t.set(ref,{name:row.name,email:row.collegeEmail,phone:row.phone,department:row.department,facultyId:row.employeeId,updatedAt:stamp()},{merge:true});
+      t.set(ref,{...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,email:row.collegeEmail,phone:row.phone,department:row.department,facultyId:row.employeeId,updatedAt:stamp()},{merge:true});
     });
     // Do not reset credentials, send another activation, or rewrite mappings.
     return {uid,name:row.name,email:row.collegeEmail,employeeId:row.employeeId,role:row.role,accountCreated:false,accountUpdated:true,warnings:[],activation:'unchanged'};
@@ -254,16 +256,10 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     if(!config) fail('Configure workflow assignments before enrolling students.');
     const items={};
     for(const type of services) items[type]={approverType:type,approverId:config[type],label:type.replaceAll('_',' '),subjectCode:null,offeringId:null};
-    for(const o of offerings.filter(o=>matchesStudent(student,o))) {
-      const teacher=(await db.doc(`users/${o.teacherId}`).get()).data();
-      items[`subject_${o.id}`]=subjectItem(student.uid || '',student,o,teacher || {});
-    }
     const requirements=[...services.map(role=>[config[role],role]),[student.mentorId,'mentor'],[config.hodId,'hod'],[config.officeId,'office'],...offerings.map(o=>[o.teacherId,'teaching'])];
-    for(const [id,role] of requirements) {
-      if(!id) fail(`Missing ${role} workflow assignment.`);
-      const user=(await db.doc(`users/${id}`).get()).data();
-      if(!user || (role==='teaching'?!['subject_faculty','mentor'].includes(user.role):user.role!==role)) fail(`Invalid ${role} workflow assignment.`);
-    }
+    const ids=[...new Set(requirements.map(([id])=>id).filter(Boolean))],users=new Map((await db.collection('users').where('__name__','in',ids).get()).docs.map(d=>[d.id,d.data()]));
+    for(const o of offerings.filter(o=>matchesStudent(student,o)))items['subject_'+o.id]=subjectItem(student.uid||'',student,o,users.get(o.teacherId)||{});
+    for(const [id,role]of requirements){const user=users.get(id);if(!user||isInactive(user)||(role==='teaching'?!['subject_faculty','mentor'].includes(user.role):role==='mentor'?!isMentor(user):user.role!==role))fail('Invalid '+role+' workflow assignment.');}
     return {valid:true,workflowVersion:3,items,initialStates:Object.fromEntries(Object.keys(items).map(k=>[k,'pending'])),approverIds:[...new Set(Object.values(items).map(i=>i.approverId))],mentorId:student.mentorId,hodId:config.hodId,officeId:config.officeId,semester:student.semester,section:student.section,updatedAt:stamp()};
   }
   async function mapStudent(uid,student,offerings,{preserveExisting=false}={}) {
@@ -274,6 +270,8 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     const plan=await planFor(student,offerings),batch=db.batch([`users/${uid}`,`students/${uid}`]);
     // Include pre-existing enrollments when preparing a plan; never silently omit them.
     const enrolled=await db.collection('enrollments').where('studentId','==',uid).get();
+    if(preserveExisting){const prior=(await db.doc('students/'+uid+'/clearance/plan').get()).data(),active=enrolled.docs.filter(e=>e.data().active===true),fields=['valid','workflowVersion','items','initialStates','approverIds','mentorId','hodId','officeId','semester','section'];if(prior&&active.length===offerings.length&&offerings.every(o=>active.filter(e=>e.data().offeringId===o.id&&e.data().teacherId===o.teacherId&&e.data().mentorId===student.mentorId).length===1)&&offerings.every(o=>student.offeringIds?.includes(o.id)&&student.teacherIds?.includes(o.teacherId))&&fields.every(field=>JSON.stringify(prior[field])===JSON.stringify(plan[field])))return offerings.length;}
+
     const selected=new Set(offerings.map(o=>o.id));
     const selectedSpecificity=Math.max(...offerings.map(o=>Number(Boolean(text(o.department)))+Number(Boolean(text(o.scheme)))));
     for(const o of offerings) {
@@ -336,6 +334,7 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
       try{account=await auth.getUser(existingUid);}catch(error){if(error.code!=='auth/user-not-found')throw error;}
       if(!account){try{account=await auth.createUser({uid:existingUid,email:row.collegeEmail,displayName:row.name,password:temporaryAccount(row,p)?demoTemporaryPassword:randomBytes(48).toString('base64url'),disabled:false});accountCreated=true;}catch(error){if(!['auth/uid-already-exists','auth/email-already-exists'].includes(error.code))throw error;try{account=await auth.getUser(existingUid);}catch{fail('Firebase identity changed during provisioning.','already-exists');}}}
       if(email(account.email)!==row.collegeEmail||account.disabled)fail('Firebase identity is conflicting or disabled.','already-exists');
+      if(row.isMentor!==undefined)await ref.set({isMentor:row.isMentor},{merge:true});
       if(accountCreated&&temporaryAccount(row,p))await ref.set({mustChangePassword:true,temporaryPasswordIssuedAt:new Date(Date.now()+1)},{merge:true});
       return {uid:existingUid,email:row.collegeEmail,role:row.role,accountCreated,authRepaired:accountCreated,subjectsMapped:0,warnings,...(accountCreated?await activation(existingUid,p):{activation:'unchanged'})};
     }
@@ -399,8 +398,8 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     }
     await jobRef.set({state:'auth-created',updatedAt:stamp()},{merge:true});
     const previousProfile=(await db.doc(`users/${uid}`).get()).data();
-    const profile={name:row.name,email:row.collegeEmail,phone:row.phone,department:row.department,scope:row.scope,facultyId:row.facultyId,role:row.role,scheme:row.scheme,updatedAt:stamp(),...(temporaryAccount(row,p)&&!previousProfile?{mustChangePassword:true,temporaryPasswordIssuedAt:new Date(Date.now()+1)}: {})};
-    const batch=db.batch();batch.set(db.doc(`users/${uid}`),profile,{merge:true});
+    const profile={...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,email:row.collegeEmail,phone:row.phone,department:row.department,scope:row.scope,facultyId:row.facultyId,role:row.role,scheme:row.scheme,updatedAt:stamp(),...(temporaryAccount(row,p)&&!previousProfile?{mustChangePassword:true,temporaryPasswordIssuedAt:new Date(Date.now()+1)}: {})};
+    const batch=db.batch(row.role==='student'?[{path:`users/${row.mentorId}`,capability:'mentor'}]:[]);batch.set(db.doc(`users/${uid}`),profile,{merge:true});
     const {mustChangePassword,temporaryPasswordIssuedAt,...studentFields}=profile;
     if(row.role==='student') batch.set(db.doc(`students/${uid}`),{uid,...studentFields,usn:row.usn,semester:row.semester,section:row.section,mentorId:row.mentorId},{merge:true});
     await batch.commit();
@@ -463,7 +462,7 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     row.active=row.active!==false && text(row.active).toLowerCase()!=='false';
     row.credits=text(row.credits)===''?null:Number(row.credits);
     if(row.credits!==null && (!Number.isFinite(row.credits) || row.credits<0 || row.credits>30)) fail('Credits must be numeric when supplied.');
-    row.subjectId=`subject_${hash([row.department,row.scheme,row.subjectCode].join('|')).slice(0,32)}`;
+    const subjectRows=await db.collection('subjects').where('department','==',row.department).where('scheme','==',row.scheme).where('code','==',row.subjectCode).limit(2).get();if(subjectRows.size>1)fail('Ambiguous subject master. Resolve duplicate subject codes before import.');if(subjectRows.size&&subjectRows.docs[0].data().name!==row.subjectName)fail('Subject name differs from the existing master.');row.subjectId=subjectRows.docs[0]?.id||`subject_${hash([row.department,row.scheme,row.subjectCode].join('|')).slice(0,32)}`;
     row.id=`class_${hash([row.department,row.scheme,row.semester,row.section,row.subjectCode].join('|')).slice(0,32)}`;
     const previous=(await db.doc(`offerings/${row.id}`).get()).data();
     if(previous && (previous.teacherId!==row.teacherId || JSON.stringify(previous.components)!==JSON.stringify(row.components))) fail('Existing offering teacher/assessments differ. Use advanced editing with explicit plan refresh; bulk import will not rewrite existing marks mappings.');
@@ -497,7 +496,7 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
       for(const result of mapped.results)if(result.error)mappingErrors.push({uid:result.uid,error:result.error});else studentsMapped++;
       cursor=mapped.nextCursor;
     }while(cursor);
-    return {id:row.id,subjectCode:row.subjectCode,active:row.active,accountCreated:false,nextCursor:null,studentsMatched,studentsMapped,mappingErrors};
+    return {id:row.id,subjectCode:row.subjectCode,active:row.active,accountCreated:false,offeringCreated:!offering.exists,nextCursor:null,studentsMatched,studentsMapped,mappingErrors};
   }
   async function mapClass({department,scheme,semester,section,cursor}) {
     const p=await policy(),d=canonicalDepartment(department,p.departmentAliases),s=text(section).toUpperCase();

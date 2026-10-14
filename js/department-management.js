@@ -1,3 +1,4 @@
+import {loadMasters} from './master-data.js';
 import {mountDepartmentExperience} from './department-experience.js';
 import {mountMultiSelectDropdown} from './multi-select-dropdown.js';
 import {mountAcademicSelects} from './master-controls.js';
@@ -12,13 +13,13 @@ function placeDepartmentContext(card){
 }
 export async function mountDepartmentContext(profile){
  if(profile.role==='admin'&&profile.departmentId){const info=document.createElement('div');info.className='card';info.id='departmentContext';info.textContent='Managing Department: '+(profile.department||'');placeDepartmentContext(info);return;}if(profile.role!=='super_admin')return;
- const masters=await apiFetch('/api/administration/masters'),current=sessionStorage.getItem('department-context:'+profile.uid)||'';
+ const masters=await loadMasters(),current=sessionStorage.getItem('department-context:'+profile.uid)||'';
  if(current&&!masters.departments.some(d=>d._id===current&&d.status==='active')){sessionStorage.removeItem('department-context:'+profile.uid);location.reload();return;}const box=document.createElement('div');box.className='card';box.id='departmentContext';box.innerHTML=`<label>Managing Department<select id="managementDepartment"><option value="">All Departments</option>${masters.departments.filter(d=>d.status==='active').map(d=>`<option value="${e(d._id)}" ${d._id===current?'selected':''}>${e(d.name)} (${e(d.code)})${d.status==='inactive'?' — inactive':''}</option>`).join('')}</select></label>`;
  placeDepartmentContext(box);box.style.maxWidth='1050px';box.style.margin='12px auto';
  box.querySelector('select').onchange=event=>{if(event.target.value)sessionStorage.setItem('department-context:'+profile.uid,event.target.value);else sessionStorage.removeItem('department-context:'+profile.uid);location.reload();};
 }
 export async function mountDepartmentManagement(actor){
- const masters=await apiFetch('/api/administration/masters'),form=document.getElementById('accountForm'),current=actor.role==='admin'?(actor.departmentId||''):sessionStorage.getItem('department-context:'+actor.uid)||'';
+ const masters=await loadMasters(),form=document.getElementById('accountForm'),current=actor.role==='admin'?(actor.departmentId||''):sessionStorage.getItem('department-context:'+actor.uid)||'';
  if(masters.departments.length&&form){const old=form.elements.department,select=document.createElement('select');select.name='department';select.required=true;select.innerHTML='<option value="">Choose department</option>'+masters.departments.filter(d=>d.status==='active'&&(!current||d._id===current)).map(d=>`<option value="${e(d.code)}">${e(d.name)} (${e(d.code)})</option>`).join('');if(current)select.value=masters.departments.find(d=>d._id===current)?.code||'';old.replaceWith(select);
  const label=document.createElement('label');label.innerHTML='Account scope<select name="scope"><option value="department">Department</option><option value="institution">Institution-wide</option></select>';label.hidden=true;form.append(label);const role=form.elements.role,scope=form.elements.scope;const refreshScope=()=>{const shared=scope.value==='institution';select.required=!shared;select.disabled=shared;if(shared)select.value='';else if(current)select.value=masters.departments.find(d=>d._id===current)?.code||'';};const update=()=>{const specific=['admin','student','subject_faculty','mentor','hod'].includes(role.value);scope.value=specific?'department':'institution';scope.disabled=specific;refreshScope();};role.addEventListener('change',update);scope.onchange=refreshScope;update();}
  mountAcademicSelects(form,masters);

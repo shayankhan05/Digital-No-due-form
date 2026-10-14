@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {DocumentStore} from './document-store.js';
 import {officeSearchDocument} from './office-search.js';
 import {departmentLabel} from '../../../js/department.js';
-export const isInactive = profile => ['inactive','deleted','deactivating'].includes(profile?.accountStatus);
+export const isInactive = profile => ['inactive','deleted','deactivating','deleting'].includes(profile?.accountStatus);
 const fail = (message,code='invalid-argument') => {throw Object.assign(new Error(message),{code});};
 const pendingStatuses=['pending_stage1','pending_mentor','pending_hod','pending_office','rejected','cleared'];
 export const facultyRoles=['subject_faculty','mentor','hod','office','library','accounts','physics_lab','chemistry_lab'];

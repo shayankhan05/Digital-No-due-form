@@ -1,9 +1,10 @@
+import {academicSummary,menteePage} from '../services/academic-summary.js';
 import {Router} from 'express';
 import {marksRoster} from '../services/marks-csv.js';
 import {canRead,scopeQuery} from '../services/authorization.js';
 import {saveMark,serialize,validPath} from './data.js';
 const resources={students:'students',teachers:'users',offerings:'offerings',enrollments:'enrollments',marks:'marks',assignments:'assignments',requests:'noDueRequests',notifications:null,'hall-tickets':'hallTickets'};
-export function resourceRoutes(store){const router=Router();
+export function resourceRoutes(store){const router=Router();router.get('/academic/student/:uid',async(req,res)=>res.json(serialize(await academicSummary(store,req.actor,req.params.uid))));router.get('/academic/mentees',async(req,res)=>res.json(serialize(await menteePage(store,req.actor,req.query))));
   router.get('/academic/roster/:id',async(req,res)=>{
     const r=await marksRoster(store,req.actor,req.params.id,{allowManager:true}),ids=r.rows.map(row=>row.enrollment.studentId),statuses=new Map();
     if(ids.length){const requests=await store.collection('noDueRequests').where('studentId','in',ids).where('approverIds','array-contains',req.actor.uid).orderBy('createdAt','desc').get();for(const doc of requests.docs)if(!statuses.has(doc.data().studentId))statuses.set(doc.data().studentId,doc.data().status);}
