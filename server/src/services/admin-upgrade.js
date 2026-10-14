@@ -1,3 +1,4 @@
+import {eligibleConfigurationAccount} from './configuration-accounts.js';
 import {assertUniqueDepartment,departmentNameKey} from './department-uniqueness.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {createProvisioner} from './provisioning.js';
@@ -60,7 +61,7 @@ export async function replaceLeadership({database,client,auth,actor,input,provis
  let uid=input.uid;if(input.newAccount){const row={...input.newAccount,role:position,scope:'department',department:dep.code};const result=await provisioner.dispatch(actor.uid,{action:'provision',row,requestId:input.requestId});uid=result.uid;}
  const candidate=uid&&await database.collection('users').findOne({_id:uid}),identity=await auth.getUser(uid||'invalid');
  if(identity.disabled||identity.email?.toLowerCase()!==candidate?.email?.toLowerCase())fail('Leadership Firebase identity is disabled or does not match the institutional account.');
- if(!candidate||isInactive(candidate)||!['admin','hod','subject_faculty','mentor'].includes(candidate.role)||(await departmentOf(database,'users',{...candidate,scope:'department'}))!==dep._id)fail('Choose an eligible active staff account in the same department.');
+ if(!eligibleConfigurationAccount(candidate)||!['admin','hod','subject_faculty','mentor'].includes(candidate.role)||(await departmentOf(database,'users',{...candidate,scope:'department'}))!==dep._id)fail('Choose an eligible active staff account in the same department.');
  if(['admin','hod'].includes(candidate.role)&&candidate.role!==position)fail('An active leadership account cannot be converted into another leadership role.');
  if(candidate.role!==position){if(await database.collection('offerings').countDocuments({teacherId:uid,active:{$ne:false}})||await database.collection('students').countDocuments({mentorId:uid,accountStatus:{$nin:['inactive','deleted','deactivating']}}))fail('Reassign active teaching/mentoring responsibilities before promoting this staff member.');}
  const session=client.startSession();let previous;try{await session.withTransaction(async()=>{

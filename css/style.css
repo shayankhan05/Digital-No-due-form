@@ -1776,3 +1776,9 @@ body.super-admin-page .app-shell { width: 100%; max-width: 1500px !important; ma
  .super-admin-page :is(#departmentForm, #schemeForm, #sectionForm, #departmentWorkflowForm, #policyForm, #accountForm, #initialAdminFields, .email-config) { grid-template-columns: 1fr; }
  .super-tabs a { flex: 1 1 140px; text-align: center; }
 }
+
+.super-admin-page :is(.department-details,.person-details) { display:grid; grid-template-columns: minmax(130px, 1fr) minmax(0, 3fr); gap: 10px 20px; }
+.super-admin-page :is(.department-details,.person-details) dd { margin:0; min-width:0; overflow-wrap:anywhere; }
+.super-admin-page #departmentEditForm { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 20px; }
+.super-admin-page:has(#content[data-active-section="create-department"]) #departmentContext { display:none; }
+@media(max-width:600px){.super-admin-page :is(.department-details,.person-details,#departmentEditForm){grid-template-columns:1fr;}.super-admin-page :is(.department-details,.person-details) dt{font-weight:600;}}
