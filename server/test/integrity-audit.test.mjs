@@ -2,6 +2,21 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {identityReservationPlan} from '../src/services/integrity-audit.js';
 import fs from 'node:fs/promises';
+import {runImportRows} from '../src/services/import-workers.js';
+
+test('import workers bound concurrency, checkpoint rows and resume without replaying saved successes',async()=>{
+ let active=0,maximum=0;const processed=[],saved=[];
+ const previous=[{index:0,uid:'existing',error:''},{index:1,error:'temporary outage'}];
+ const result=await runImportRows({start:0,end:10,previous,process:async index=>{processed.push(index);maximum=Math.max(maximum,++active);await new Promise(resolve=>setTimeout(resolve,5));active--;return{index,uid:'uid-'+index,error:''};},checkpoint:async row=>{saved.push(row);}});
+ assert.equal(maximum,3);assert.equal(processed.length,9);assert.ok(!processed.includes(0));assert.ok(processed.includes(1));assert.equal(saved.length,9);assert.deepEqual(result.map(r=>r.index),Array.from({length:10},(_,i)=>i));assert.equal(result[0].uid,'existing');
+ const retried=await runImportRows({start:0,end:10,previous:result,process:()=>{throw Error('Saved rows must not be provisioned again');},checkpoint:()=>{throw Error('Saved rows need no new writes');}});assert.deepEqual(retried,result);
+});
+
+test('import checkpoint failure drains in-flight rows before the lease can be released',async()=>{
+ let active=0,completed=0;
+ await assert.rejects(runImportRows({start:0,end:3,process:async index=>{active++;await new Promise(resolve=>setTimeout(resolve,index?15:1));active--;completed++;return{index};},checkpoint:async row=>{if(row.index===0)throw Error('Lease changed');}}),/Lease changed/);
+ assert.equal(active,0);assert.equal(completed,3);
+});
 
 test('Hosting explicitly includes every published college CSV template',async()=>{
  const config=JSON.parse(await fs.readFile(new URL('../../firebase.json',import.meta.url),'utf8'));

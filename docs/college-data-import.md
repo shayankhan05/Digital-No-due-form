@@ -14,6 +14,8 @@ Before importing, create/activate the department, schemes and sections, assign i
 
 Each file follows Select CSV → Validate & preview → review checkbox → Confirm. All rows must pass preflight; invalid files create no accounts. Confirmation processes ten rows per request with progress. A later infrastructure failure is reported per row and can be resumed using **Retry failed rows**. Download the report to see each outcome. Reimporting preserves existing UIDs, passwords, marks and completed workflow history; inactive identities require explicit reactivation.
 
+Confirmation uses at most three provisioning workers and checkpoints each row. A leased job retains completed results across interrupted requests; ownership checks prevent an expired worker from overwriting a resumed job.
+
 ## Template headers
 
 Student (`templates/college-student-import.csv`):
