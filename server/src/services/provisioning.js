@@ -19,7 +19,7 @@ const snapshotData=s=>s.exists?{...s.data(),uid:s.id}:null;
 // Existing local demo policy; production explicitly opts in by account type.
 // This public demo credential is never persisted in institutional data.
 const demoTemporaryPassword='DemoPassword123!';
-export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,sendActivation=async()=>{throw new Error('Mail delivery is not configured.');}}) {
+export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{throw new Error('Mail delivery is not configured.');}}) {
   // Production demo provisioning is an explicit institution policy, scoped to
   // student or staff demo addresses. It never switches Auth to an emulator.
   const temporaryAccount=(row,p)=>demo || email(row.collegeEmail || row.email).endsWith('@demo.test') && (row.role==='student'?p.demoStudentProvisioningEnabled===true:p.demoStaffProvisioningEnabled===true);
@@ -31,8 +31,8 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
   }
   async function policy() {
     const data=(await db.doc('settings/institution').get()).data() || {};data.sections=sectionMaster(data).filter(s=>s.status==='active').map(s=>s.code);
-    const masters=await db.collection('departments').get(),schemeRows=await db.collection('schemes').get();if(departmentBootstrap){const staged=masters.docs.find(d=>d.id===departmentBootstrap.id&&d.data().code===departmentBootstrap.code&&d.data().status==='provisioning');if(!staged)fail('Invalid department provisioning job.');}
-    if(!masters.empty)data.departments=masters.docs.filter(d=>d.data().status==='active'||departmentBootstrap&&d.id===departmentBootstrap.id).map(d=>d.data().code);if(!schemeRows.empty)data.schemes=schemeRows.docs.filter(d=>d.data().status==='active').map(d=>d.data().code);return {...data,departmentRecords:masters.docs.map(d=>({...d.data(),id:d.id})),schemeRecords:schemeRows.docs.map(d=>({...d.data(),id:d.id})),allowedDomains:data.allowedDomains || [],departments:[...new Set((data.departments || (demo?['ISE']:[])).map(v=>canonicalDepartment(v,data.departmentAliases))) ],schemes:data.schemes || ['2022'],sections:data.sections || ['A','B','C']};
+    const masters=await db.collection('departments').get(),schemeRows=await db.collection('schemes').get();
+    if(!masters.empty)data.departments=masters.docs.filter(d=>d.data().status==='active').map(d=>d.data().code);if(!schemeRows.empty)data.schemes=schemeRows.docs.filter(d=>d.data().status==='active').map(d=>d.data().code);return {...data,departmentRecords:masters.docs.map(d=>({...d.data(),id:d.id})),schemeRecords:schemeRows.docs.map(d=>({...d.data(),id:d.id})),allowedDomains:data.allowedDomains || [],departments:[...new Set((data.departments || (demo?['ISE']:[])).map(v=>canonicalDepartment(v,data.departmentAliases))) ],schemes:data.schemes || ['2022'],sections:data.sections || ['A','B','C']};
   }
   async function resolve(field,value,roleSet) {
     if(!text(value)) return null;

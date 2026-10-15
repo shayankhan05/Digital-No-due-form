@@ -6,22 +6,23 @@ import {createHash,randomUUID} from 'node:crypto';
 import {createProvisioner} from './provisioning.js';
 import {DocumentStore} from './document-store.js';
 import {accountExit,accountRemoval,isInactive} from './account-removal.js';
-import {authorizeAccountTarget,departmentOf,migrateDepartmentMaster} from './department-master.js';
+import {authorizeAccountTarget,departmentOf} from './department-master.js';
 const hash=v=>createHash('sha256').update(v).digest('hex');
 const fail=(message,code='invalid-argument')=>{throw Object.assign(new Error(message),{code});};
 const manager=async(db,actor,superOnly=false)=>{const u=await db.collection('users').findOne({_id:actor.uid});if(!u||isInactive(u)||!(superOnly?u.role==='super_admin':['admin','super_admin'].includes(u.role)))fail('Administrator permission required.','permission-denied');return {...u,uid:u._id,managementDepartmentId:actor.managementDepartmentId};};
 export async function auditAdmin(db,session,actor,action,departmentId,targets,summary,extra={}){
  await db.collection('superAdminAudit').insertOne({_id:randomUUID(),actorUid:actor.uid,actorId:actor.uid,actorRole:actor.role,departmentId:departmentId||null,action,targets,timestamp:new Date(),summary,...extra},{session});
 }
-export async function createDepartmentWithAdmin({database,client,actor,input}){
+export async function createDepartmentMaster({database,client,actor,input}){
  actor=await manager(database,actor,true);
  const code=String(input.code||'').trim().toUpperCase(),name=String(input.name||'').trim(),requestId=input.requestId;
  if(!/^[A-Z0-9_-]{1,30}$/.test(code)||!name||name.length>150||!['active','inactive'].includes(input.status))fail('Valid department name, code and status are required.');
  if(!/^[A-Za-z0-9_-]{8,100}$/.test(requestId||''))fail('A stable department request ID is required.');
  const id='dept_'+hash(actor.uid+':'+requestId).slice(0,32);await assertUniqueDepartment(database,{code,name,id});
  if(input.initialAdmin)fail('Create the department first, then explicitly assign its Admin in Department Setup.');
+ if(input.schemeIds!==undefined&&!Array.isArray(input.schemeIds)||input.sections!==undefined&&!Array.isArray(input.sections))fail('Schemes and sections must be selected lists.');
  const schemeIds=[...new Set(input.schemeIds||[])],sections=[...new Set((input.sections||[]).map(v=>String(v).trim().toUpperCase()))];
- if(!schemeIds.length||!sections.length||sections.some(v=>! /^[A-Z0-9-]{1,10}$/.test(v)))fail('Choose applicable schemes and sections.');
+ if(sections.some(v=>! /^[A-Z0-9-]{1,10}$/.test(v)))fail('Choose applicable schemes and sections.');
  for(const sid of schemeIds)if(!await database.collection('schemes').findOne({_id:sid,status:'active'}))fail('Choose active schemes.');
  const digest=hash(JSON.stringify({code,name,status:input.status,schemeIds,sections})),session=client.startSession();
  try{await session.withTransaction(async()=>{
