@@ -1782,3 +1782,39 @@ body.super-admin-page .app-shell { width: 100%; max-width: 1500px !important; ma
 .super-admin-page #departmentEditForm { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 20px; }
 .super-admin-page:has(#content[data-active-section="create-department"]) #departmentContext { display:none; }
 @media(max-width:600px){.super-admin-page :is(.department-details,.person-details,#departmentEditForm){grid-template-columns:1fr;}.super-admin-page :is(.department-details,.person-details) dt{font-weight:600;}}
+
+/* Department setup and college imports share the existing theme tokens. */
+.setup-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; }
+.setup-heading h2 { margin-top:0; }
+.setup-heading p { color:var(--text-muted); }
+.setup-state { padding:8px 12px; border:1px solid var(--border); border-radius:8px; background:var(--gray-bg); }
+.setup-summary-grid, .import-categories { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin:20px 0; }
+.setup-summary-card, .setup-panel, .import-category { min-width:0; padding:18px; border:1px solid var(--border); border-radius:10px; background:var(--white); overflow-wrap:anywhere; }
+.setup-summary-card h3, .setup-panel h3, .import-category h3 { margin-top:0; }
+.setup-summary-card:last-child { grid-column:span 2; }
+.setup-metrics { margin:0; }
+.setup-metrics > div { display:flex; justify-content:space-between; align-items:baseline; gap:16px; padding:8px 0; border-bottom:1px solid var(--border); }
+.setup-metrics dt { color:var(--text-muted); }
+.setup-metrics dd { margin:0; font-weight:600; text-align:right; min-width:0; overflow-wrap:anywhere; }
+.setup-panel { margin-top:16px; }
+.setup-progress { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px 20px; list-style:none; padding:0; }
+.setup-progress li { display:flex; justify-content:space-between; gap:10px; align-items:center; padding:10px 0; border-bottom:1px solid var(--border); min-width:0; }
+.setup-check { font-size:13px; text-align:right; }
+.setup-check.complete { color:var(--green-text); }
+.setup-check.attention { color:var(--orange-text); }
+.setup-check.pending { color:var(--text-muted); }
+.setup-steps { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; padding:0; list-style:none; }
+.setup-steps li { min-width:0; }
+.setup-steps button { width:100%; height:100%; display:flex; align-items:center; gap:10px; padding:12px; text-align:left; color:var(--text); background:var(--gray-bg); border:1px solid var(--border); border-radius:8px; cursor:pointer; font:inherit; font-size:13px; }
+.setup-steps button span { font-weight:700; }
+.readiness-confirmation { display:flex; align-items:center; gap:10px; margin:16px 0; }
+.readiness-confirmation input { width:auto; margin:0; }
+.readiness-missing { display:flex; flex-wrap:wrap; gap:8px 28px; padding-left:20px; }
+.import-category { display:flex; flex-direction:column; gap:12px; }
+.import-category p { flex:1; margin:0; color:var(--text-muted); }
+.import-category .btn-sm { text-align:center; margin:0; white-space:normal; }
+.import-category.selected { outline:2px solid var(--text-muted); outline-offset:1px; }
+#sectionEditor { padding:16px; border:1px solid var(--border); border-radius:8px; margin-top:16px; }
+#sectionEditor[hidden] { display:none !important; }
+@media(max-width:1000px){.setup-summary-grid,.import-categories,.setup-progress{grid-template-columns:repeat(2,minmax(0,1fr));}.setup-summary-card:last-child{grid-column:auto;}.setup-steps{grid-template-columns:repeat(3,minmax(0,1fr));}}
+@media(max-width:600px){.setup-summary-grid,.import-categories,.setup-progress,.setup-steps{grid-template-columns:minmax(0,1fr);}.setup-summary-card,.setup-panel,.import-category{padding:14px;}.setup-metrics > div{gap:10px;}.setup-state{width:100%;}.setup-summary-card:last-child{grid-column:auto;}}

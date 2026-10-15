@@ -1,1 +1,2 @@
-usn,name,college_email,phone,department_code,semester,section,scheme,mentor_employee_id
+usn,name,college_email,phone,scheme,semester,section,mentor_employee_id
+DEPT-STU-001,Student Name,student@example.edu,9999999998,2022,5,A,DEPT-FAC-001

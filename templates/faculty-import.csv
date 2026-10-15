@@ -1,1 +1,2 @@
-employee_id,name,college_email,phone,department_code,is_mentor
+employee_id,name,college_email,phone,is_mentor
+DEPT-FAC-001,Faculty Name,faculty@example.edu,9999999999,true
