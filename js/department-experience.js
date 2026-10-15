@@ -3,7 +3,7 @@ import {apiFetch,post} from './api.js';
 import {escapeHtml as e,busy} from './ui.js';
 const serviceLabels={officeId:'Central Office',library:'Central Library',accounts:'Accounts Department',physics_lab:'Physics Lab',chemistry_lab:'Chemistry Lab'};
 export async function mountDepartmentExperience(root,actor,masters,current){
- const creation=document.createElement('section');creation.id='departmentCreate';creation.className='card';creation.innerHTML='<h2>Create Department</h2><p>Create a new department and its first Department Admin.</p>';
+ const creation=document.createElement('section');creation.id='departmentCreate';creation.className='card';creation.innerHTML='<h2>Create Department</h2><p>Create an empty department. Assign leadership and import academic data explicitly in Department Setup.</p>';
  document.getElementById('departmentFormTitle').remove();creation.append(document.getElementById('departmentForm'),document.getElementById('departmentStatus'));root.append(creation);
  creation.querySelector('button[type=reset]').textContent='Clear form';
  const selected=masters.departments.find(d=>d._id===current),master=document.getElementById('departmentMaster');

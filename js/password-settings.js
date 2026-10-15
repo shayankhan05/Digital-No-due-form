@@ -1,5 +1,5 @@
 import {auth} from './firebase-config.js';
-import {requireAuth,wireLogout,signOutAndClear} from './auth.js';
+import {requireAuth,wireLogout,signOutAndClear,setPasswordChangeInProgress} from './auth.js';
 import {post} from './api.js';
 import {EmailAuthProvider,reauthenticateWithCredential,updatePassword} from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
 import {initThemeToggle} from './theme.js';
@@ -13,7 +13,7 @@ requireAuth(null,{allowPasswordChange:true}).then(profile=>{
     const next=document.getElementById('newPassword').value;
     if(next!==document.getElementById('confirmPassword').value) {status.textContent='New passwords do not match.';return;}
     if(next==='DemoPassword123!'){status.textContent='Choose a password different from the temporary password.';return;}
-    button.disabled=true;
+    button.disabled=true;setPasswordChangeInProgress(true);
     try {
       await reauthenticateWithCredential(auth.currentUser,EmailAuthProvider.credential(auth.currentUser.email,document.getElementById('currentPassword').value));
       await updatePassword(auth.currentUser,next);
@@ -25,6 +25,6 @@ requireAuth(null,{allowPasswordChange:true}).then(profile=>{
       await signOutAndClear();sessionStorage.setItem('passwordChangedNotice',message);window.location.replace('login.html');
     } catch(error) {
       status.textContent=['auth/invalid-credential','auth/wrong-password'].includes(error.code)?'Current password is incorrect.':error.code==='auth/requires-recent-login'?'Sign out, log in again, then retry changing your password.':error.code==='auth/weak-password'?'Choose a stronger password that meets your college password policy.':'Could not change the password. Check your connection and try again.';
-    } finally {button.disabled=false;}
+    } finally {button.disabled=false;setPasswordChangeInProgress(false);}
   };
 }).catch(error=>{document.getElementById('passwordStatus').textContent=error.message;});

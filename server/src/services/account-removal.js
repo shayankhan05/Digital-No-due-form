@@ -1,3 +1,4 @@
+import {isMentor} from '../../../js/capabilities.js';
 import {authorizeAccountTarget} from './department-master.js';
 import {isManager} from './roles.js';
 import {randomUUID} from 'node:crypto';
@@ -99,7 +100,7 @@ export async function accountRemoval({database,client,auth,actor,uid,confirmatio
     const enrollments=profile.role!=='student'?await database.collection('enrollments').countDocuments({teacherId:uid,active:true},options):0;
     const candidates=profile.role!=='student'?await database.collection('noDueRequests').find({status:{$in:pendingStatuses},$or:[{approverIds:uid},{mentorId:uid},{hodId:uid},{officeId:uid}]},options).toArray():[];
     const requests=candidates.filter(r=>r.hodId===uid&&r.hodApproval?.status!=='approved'||r.officeId===uid||r.mentorId===uid&&r.mentorApproval?.status!=='approved'||!r.approvalItems&&r.approverIds?.includes(uid)||Object.entries(r.approvalItems||{}).some(([key,item])=>item.approverId===uid&&r.approvalStates?.[key]!=='approved'));
-    const mentees=profile.role==='mentor'?await database.collection('students').countDocuments({mentorId:uid,accountStatus:{$nin:['inactive','deleted','deactivating']}},options):0;
+    const mentees=isMentor(profile)?await database.collection('students').countDocuments({mentorId:uid,accountStatus:{$nin:['inactive','deleted','deactivating']}},options):0;
     const blockers=[];
     if(profile.exitOperation==='reactivating')blockers.push('Account reactivation is pending. Finish reactivation before deactivating again.');
     const departmentWorkflows=await database.collection('departmentWorkflows').find({$or:[{hodId:uid},{officeId:uid},{library:uid},{accounts:uid}]} ,options).toArray();if(departmentWorkflows.length)blockers.push('This employee is assigned in a department workflow. Replace that responsibility first.');

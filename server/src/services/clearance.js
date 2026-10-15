@@ -7,7 +7,7 @@ export const REQUIRED_SERVICES=['library','accounts'];
 const text=v=>String(v ?? '').trim();
 const department=v=>departmentCode(v).toLowerCase();
 export function matchesStudent(student,offering) {
-  return (!student.departmentId||!offering.departmentId||student.departmentId===offering.departmentId) && !isInactive(student) && offering.active!==false && Number(offering.semester)===Number(student.semester)
+  return (!student.strictDepartmentScope||offering.departmentId===student.departmentId) && (!student.departmentId||!offering.departmentId||student.departmentId===offering.departmentId) && !isInactive(student) && offering.active!==false && Number(offering.semester)===Number(student.semester)
     && text(offering.section).toUpperCase()===text(student.section).toUpperCase()
     && (!text(offering.department) || department(offering.department)===department(student.department))
     && (!text(offering.scheme) || text(offering.scheme)===text(student.scheme));

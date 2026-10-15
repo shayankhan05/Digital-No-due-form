@@ -8,7 +8,7 @@ import {
   sendPasswordResetEmail,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import { doc, getDoc } from "./api-store.js";
-import {publicPost,post} from './api.js';
+import {publicPost,post,apiFetch} from './api.js';
 import './password-visibility.js';
 import './responsive-layout.js';
 import {showPasswordReminder,reminderKey} from './password-reminder.js';
@@ -28,12 +28,14 @@ const ROLE_HOME = {
   super_admin: "super-admin-dashboard.html",
 };
 const PROFILE_ERROR = "Your account exists but your institutional profile is not yet configured. Contact administrator.";
+let intentionalSignOut = false;
+let passwordChangeInProgress = false;
+export const setPasswordChangeInProgress = value => {passwordChangeInProgress=!!value;};
 
 /** Reads the signed-in user's profile document from /users/{uid}. */
 export async function getCurrentUserProfile() {
   if (!auth.currentUser) return null;
-  const snap = await getDoc(doc(db, "users", auth.currentUser.uid));
-  return snap.exists() ? { ...snap.data(), uid: auth.currentUser.uid } : null;
+  return apiFetch('/api/auth/profile');
 }
 
 /**
@@ -42,28 +44,40 @@ export async function getCurrentUserProfile() {
  */
 export function requireAuth(roles = null,{allowPasswordChange=false}={}) {
   return new Promise((resolve, reject) => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      unsubscribe();
+    let generation=0,initial=null,settled=false,redirecting=false;
+    const clear=()=>{document.getElementById('content')?.replaceChildren();document.querySelectorAll('dialog').forEach(d=>d.remove());};
+    const redirect=profile=>{redirecting=true;clear();window.location.replace(profile&&ROLE_HOME[profile.role]||'login.html');};
+    const validate=async user=>{
+      const run=++generation;
+      if(passwordChangeInProgress&&initial&&user?.uid===initial.uid)return;
+      if(!user){if(!intentionalSignOut)redirect();return;}
+      if(initial&&user.uid!==initial.uid){clear();}
       try {
-      if (!user) {
-        window.location.href = "login.html";
-        return;
-      }
       const profile = await getCurrentUserProfile();
+      if(run!==generation||auth.currentUser?.uid!==user.uid)return;
       if (!profile || !ROLE_HOME[profile.role]) {
-        alert(PROFILE_ERROR);
-        await signOut(auth);
-        window.location.href = "login.html";
+        redirect();
         return;
       }
       if (roles && !hasRole(profile,roles)) {
-        window.location.href = ROLE_HOME[profile.role] || "login.html";
+        redirect(profile);
         return;
       }
-      await mountDepartmentContext(profile).catch(()=>{});if(isMentor(profile)&&profile.role==='subject_faculty'&&!document.getElementById('mentorCapabilityLink')){const a=document.createElement('a');a.id='mentorCapabilityLink';a.className='btn-sm';a.href='mentor-dashboard.html';a.textContent='My mentees';document.getElementById('logoutBtn')?.parentNode.append(a);}resolve(profile);
+      if(initial&&(initial.uid!==profile.uid||initial.role!==profile.role)){redirect(profile);return;}
+      if(settled)return;
+      initial={uid:profile.uid,role:profile.role};settled=true;
+      await mountDepartmentContext(profile).catch(()=>{});if(redirecting||auth.currentUser?.uid!==profile.uid)return;if(isMentor(profile)&&profile.role==='subject_faculty'&&!document.getElementById('mentorCapabilityLink')){const a=document.createElement('a');a.id='mentorCapabilityLink';a.className='btn-sm';a.href='mentor-dashboard.html';a.textContent='My mentees';document.getElementById('logoutBtn')?.parentNode.append(a);}resolve(profile);
       if (!allowPasswordChange) showPasswordReminder(profile);
-      } catch (error) { reject(error); }
-    });
+      } catch (error) {
+        if(run!==generation||intentionalSignOut||passwordChangeInProgress)return;
+        if(['unauthenticated','account/inactive','account/leadership-revoked','institution/profile-missing'].includes(error.code)){redirect();return;}
+        if(!settled)reject(error);
+      }
+    };
+    const unsubscribe = onAuthStateChanged(auth, validate);
+    const focus=()=>{if(document.visibilityState==='visible')validate(auth.currentUser);};
+    window.addEventListener('focus',focus);document.addEventListener('visibilitychange',focus);
+    window.addEventListener('pagehide',()=>{generation++;unsubscribe();window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);},{once:true});
   });
 }
 
@@ -164,6 +178,7 @@ function friendlyAuthError(code) {
 }
 
 export async function signOutAndClear(){
-  await signOut(auth);
+  intentionalSignOut = true;
+  try { await signOut(auth); } catch(error) { intentionalSignOut = false; throw error; }
   for(const key of Object.keys(sessionStorage))if(key.startsWith('temporary-password-reminder:')||key.startsWith('noDueSubmitKey:')||key.startsWith('department-context:'))sessionStorage.removeItem(key);
 }

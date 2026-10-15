@@ -1,10 +1,10 @@
-const sections=[['overview','Overview'],['departments','Departments'],['create-department','+ Create Department'],['accounts','Accounts'],['academic-setup','Academic Setup'],['workflow-setup','Workflow Setup'],['institution-settings','Institution Settings']];
+const sections=[['overview','Overview'],['departments','Departments'],['create-department','+ Create Department'],['department-setup','Department Setup'],['accounts','Accounts'],['academic-setup','Academic Setup'],['workflow-setup','Workflow Setup'],['institution-settings','Institution Settings']];
 const aliases={superOverview:'overview',departmentMaster:'departments',collegeAccounts:'accounts',academicSetup:'academic-setup',departmentWorkflow:'workflow-setup',institutionSettings:'institution-settings'};
 export function workspaceSection(hash){const key=String(hash||'').replace(/^#/,'');return sections.some(([id])=>id===key)?key:aliases[key]||'overview';}
 export function mountSuperWorkspace(content){
  const root=document.getElementById('superManagement'),panels=new Map(sections.map(([id,title])=>{const section=document.createElement('section');section.id='super-panel-'+id;section.dataset.superSection=id;section.setAttribute('aria-label',title);section.hidden=true;return[id,section];}));
  const move=(id,selector)=>{const node=document.querySelector(selector);if(node)panels.get(id).append(node);};
- move('create-department','#departmentCreate');move('overview','#superOverview');move('departments','#departmentMaster');move('departments','#leadershipHost');move('academic-setup','#academicSetup');move('workflow-setup','#departmentWorkflow');move('institution-settings','#institutionSettings');
+ move('department-setup','#departmentSetup');move('create-department','#departmentCreate');move('overview','#superOverview');move('departments','#departmentMaster');move('departments','#leadershipHost');move('academic-setup','#academicSetup');move('workflow-setup','#departmentWorkflow');move('institution-settings','#institutionSettings');
  // Retain all existing account/import/search cards and their event handlers.
  for(const node of Array.from(content.children))if(node!==root){if(node.matches('.banner,nav'))panels.get('overview').append(node);else panels.get('accounts').append(node);}
  move('accounts','#accountDirectoryHost');

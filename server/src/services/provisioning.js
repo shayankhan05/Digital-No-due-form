@@ -71,6 +71,8 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
       if(!p.sections.includes(row.section)||!(p.departmentRecords.find(d=>d.code===row.department)?.sections||p.sections).includes(row.section)) fail('Choose a configured section.');
       if(!row.scheme) fail('Scheme is required.');if(p.schemeRecords.length&&!p.schemeRecords.some(s=>s.code===row.scheme&&s.status==='active'&&(s.scope==='institution'||s.departmentIds?.includes(p.departmentRecords.find(d=>d.code===row.department)?.id))&&(!p.departmentRecords.find(d=>d.code===row.department)?.schemeIds?.length||p.departmentRecords.find(d=>d.code===row.department).schemeIds.includes(s.id))))fail('Choose an active scheme applicable to this department.');
     } else if(!row.facultyId || !/^[A-Z0-9_-]{1,80}$/.test(row.facultyId)) fail('Faculty/employee ID must contain letters, numbers, hyphens or underscores.');
+    const master=p.departmentRecords.find(d=>d.code===row.department);
+    if(row.scope==='department'&&master){row.departmentId=master.id;if(master.creationDigest)row.strictDepartmentScope=true;}
     return row;
   }
   async function matchingOfferings(s) {
@@ -81,7 +83,7 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     // Query semester first: active == true would discard the legacy records.
     const found=await db.collection('offerings').where('semester','in',[Number(s.semester),String(s.semester)]).get();
     const candidates=found.docs.map(d=>({...d.data(),id:d.id})).filter(o=>
-      (o.active===undefined || o.active===true) &&
+      (!s.strictDepartmentScope||o.departmentId===s.departmentId) && (o.active===undefined || o.active===true) &&
       text(o.section).toUpperCase()===text(s.section).toUpperCase() &&
       (!o.departmentId||!s.departmentId||o.departmentId===s.departmentId) && (!text(o.department) || canonicalDepartment(o.department)===canonicalDepartment(s.department)) &&
       (!text(o.scheme) || text(o.scheme)===text(s.scheme)));
@@ -210,7 +212,7 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
       }
     }
     const {row}=await validate(safe,{uid:existing?.uid,p});
-    return {row:{...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,collegeEmail:row.collegeEmail,phone:row.phone,department:row.department,employeeId:row.facultyId,role:row.role},uid:existing?.uid || row.existingUid,authMissing:!existing,pendingCaller};
+    return {row:{...(row.departmentId?{departmentId:row.departmentId}:{}),...(row.strictDepartmentScope?{strictDepartmentScope:true}:{}),...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,collegeEmail:row.collegeEmail,phone:row.phone,department:row.department,employeeId:row.facultyId,role:row.role},uid:existing?.uid || row.existingUid,authMissing:!existing,pendingCaller};
   }
   async function previewTeachers(inputs) {
     if(!Array.isArray(inputs) || inputs.length<1 || inputs.length>100) fail('Preview 1–100 teacher rows per chunk.');
@@ -246,7 +248,7 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
       const [profile,...identities]=await Promise.all([t.get(ref),...keys.map(key=>t.get(key))]);if(row.isMentor===false&&profile.data()?.isMentor&&!(await t.get(db.collection('students').where('mentorId','==',uid).limit(1))).empty)fail('Reassign mentees before removing mentor capability.');
       if(profile.data()?.role!==row.role || text(profile.data()?.facultyId).toUpperCase()!==row.employeeId || email(profile.data()?.email)!==row.collegeEmail || identities.some(s=>s.exists&&s.data().uid!==uid)) fail('Institutional identity changed; validate the teacher CSV again.','already-exists');
       for(const key of keys)t.set(key,{uid},{merge:true});
-      t.set(ref,{...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,email:row.collegeEmail,phone:row.phone,department:row.department,facultyId:row.employeeId,updatedAt:stamp()},{merge:true});
+      t.set(ref,{...(row.departmentId?{departmentId:row.departmentId}:{}),...(row.strictDepartmentScope?{strictDepartmentScope:true}:{}),...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,email:row.collegeEmail,phone:row.phone,department:row.department,facultyId:row.employeeId,updatedAt:stamp()},{merge:true});
     });
     // Do not reset credentials, send another activation, or rewrite mappings.
     return {uid,name:row.name,email:row.collegeEmail,employeeId:row.employeeId,role:row.role,accountCreated:false,accountUpdated:true,warnings:[],activation:'unchanged'};
@@ -398,7 +400,7 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     }
     await jobRef.set({state:'auth-created',updatedAt:stamp()},{merge:true});
     const previousProfile=(await db.doc(`users/${uid}`).get()).data();
-    const profile={...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,email:row.collegeEmail,phone:row.phone,department:row.department,scope:row.scope,facultyId:row.facultyId,role:row.role,scheme:row.scheme,updatedAt:stamp(),...(temporaryAccount(row,p)&&!previousProfile?{mustChangePassword:true,temporaryPasswordIssuedAt:new Date(Date.now()+1)}: {})};
+    const profile={...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,email:row.collegeEmail,phone:row.phone,...(row.departmentId?{departmentId:row.departmentId}:{}),...(row.strictDepartmentScope?{strictDepartmentScope:true}:{}),department:row.department,scope:row.scope,facultyId:row.facultyId,role:row.role,scheme:row.scheme,updatedAt:stamp(),...(temporaryAccount(row,p)&&!previousProfile?{mustChangePassword:true,temporaryPasswordIssuedAt:new Date(Date.now()+1)}: {})};
     const batch=db.batch(row.role==='student'?[{path:`users/${row.mentorId}`,capability:'mentor'}]:[]);batch.set(db.doc(`users/${uid}`),profile,{merge:true});
     const {mustChangePassword,temporaryPasswordIssuedAt,...studentFields}=profile;
     if(row.role==='student') batch.set(db.doc(`students/${uid}`),{uid,...studentFields,usn:row.usn,semester:row.semester,section:row.section,mentorId:row.mentorId},{merge:true});
@@ -420,7 +422,7 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     if(await duplicate('email',row.collegeEmail,'users',expectedUid) || row.role==='student' && await duplicate('usn',row.usn,'students',expectedUid)
       || row.role!=='student' && await duplicate('facultyId',row.facultyId,'users',expectedUid)) fail('Conflicting institutional identity.','already-exists');
     if(row.role==='student') row.mentorId=(await mentor(row)).uid;
-    const profile={name:row.name,email:row.collegeEmail,phone:row.phone,department:row.department,scope:row.scope,facultyId:row.facultyId,role:row.role,scheme:row.scheme};
+    const profile={name:row.name,email:row.collegeEmail,phone:row.phone,...(row.departmentId?{departmentId:row.departmentId}:{}),...(row.strictDepartmentScope?{strictDepartmentScope:true}:{}),department:row.department,scope:row.scope,facultyId:row.facultyId,role:row.role,scheme:row.scheme};
     const student={uid:expectedUid,...profile,usn:row.usn,semester:row.semester,section:row.section,mentorId:row.mentorId};
     const keys=[['email',row.collegeEmail],[row.role==='student'?'usn':'facultyId',row.role==='student'?row.usn:row.facultyId]].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
     const userRef=db.doc(`users/${expectedUid}`),studentRef=db.doc(`students/${expectedUid}`);
@@ -462,7 +464,8 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     row.active=row.active!==false && text(row.active).toLowerCase()!=='false';
     row.credits=text(row.credits)===''?null:Number(row.credits);
     if(row.credits!==null && (!Number.isFinite(row.credits) || row.credits<0 || row.credits>30)) fail('Credits must be numeric when supplied.');
-    const subjectRows=await db.collection('subjects').where('department','==',row.department).where('scheme','==',row.scheme).where('code','==',row.subjectCode).limit(2).get();if(subjectRows.size>1)fail('Ambiguous subject master. Resolve duplicate subject codes before import.');if(subjectRows.size&&subjectRows.docs[0].data().name!==row.subjectName)fail('Subject name differs from the existing master.');row.subjectId=subjectRows.docs[0]?.id||`subject_${hash([row.department,row.scheme,row.subjectCode].join('|')).slice(0,32)}`;
+    const academicMaster=p.departmentRecords.find(d=>d.code===row.department);let subjectQuery=db.collection('subjects');if(academicMaster?.creationDigest)subjectQuery=subjectQuery.where('departmentId','==',academicMaster.id);const subjectRows=await subjectQuery.where('department','==',row.department).where('scheme','==',row.scheme).where('code','==',row.subjectCode).limit(2).get();if(subjectRows.size>1)fail('Ambiguous subject master. Resolve duplicate subject codes before import.');if(subjectRows.size&&subjectRows.docs[0].data().name!==row.subjectName)fail('Subject name differs from the existing master.');row.subjectId=subjectRows.docs[0]?.id||`subject_${hash([row.department,row.scheme,row.subjectCode].join('|')).slice(0,32)}`;
+    row.departmentId=p.departmentRecords.find(d=>d.code===row.department)?.id;
     row.id=`class_${hash([row.department,row.scheme,row.semester,row.section,row.subjectCode].join('|')).slice(0,32)}`;
     const previous=(await db.doc(`offerings/${row.id}`).get()).data();
     if(previous && (previous.teacherId!==row.teacherId || JSON.stringify(previous.components)!==JSON.stringify(row.components))) fail('Existing offering teacher/assessments differ. Use advanced editing with explicit plan refresh; bulk import will not rewrite existing marks mappings.');
@@ -481,8 +484,8 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     const row=await validateOffering(input),batch=db.batch([`users/${row.teacherId}`]);
     const subjectRef=db.doc(`subjects/${row.subjectId}`),offeringRef=db.doc(`offerings/${row.id}`);
     const [subject,offering]=await Promise.all([subjectRef.get(),offeringRef.get()]);
-    const subjectFields={name:row.subjectName,code:row.subjectCode,department:row.department,scheme:row.scheme,credits:row.credits};
-    const offeringFields={subjectId:row.subjectId,subjectName:row.subjectName,subjectCode:row.subjectCode,department:row.department,scheme:row.scheme,semester:row.semester,section:row.section,teacherId:row.teacherId,active:row.active,credits:row.credits,components:row.components,componentIds:row.components.map(c=>c.id)};
+    const subjectFields={...(row.departmentId?{departmentId:row.departmentId}:{}),name:row.subjectName,code:row.subjectCode,department:row.department,scheme:row.scheme,credits:row.credits};
+    const offeringFields={...(row.departmentId?{departmentId:row.departmentId}:{}),subjectId:row.subjectId,subjectName:row.subjectName,subjectCode:row.subjectCode,department:row.department,scheme:row.scheme,semester:row.semester,section:row.section,teacherId:row.teacherId,active:row.active,credits:row.credits,components:row.components,componentIds:row.components.map(c=>c.id)};
     const unchanged=(snapshot,fields)=>snapshot.exists && Object.entries(fields).every(([key,value])=>JSON.stringify(snapshot.data()[key])===JSON.stringify(value));
     if(!unchanged(subject,subjectFields))batch.set(subjectRef,{...subjectFields,updatedAt:stamp()},{merge:true});
     if(!unchanged(offering,offeringFields))batch.set(offeringRef,{...offeringFields,updatedAt:stamp()},{merge:true});
@@ -503,7 +506,7 @@ export function createProvisioner({db,auth,demo=false,departmentBootstrap=null,s
     if(!p.departments.includes(d) || !p.sections.includes(s) || !Number.isInteger(Number(semester)) || !text(scheme)) fail('Valid class filters required.');
     // Coarse indexed cohort query, then normalize historical class field types.
     // Page by scanned documents even when a page contains no matching students.
-    let q=db.collection('students').where('semester','in',[Number(semester),String(Number(semester))]).orderBy('__name__').limit(20);
+    const master=p.departmentRecords.find(record=>record.code===d);let q=db.collection('students').where('semester','in',[Number(semester),String(Number(semester))]);if(master?.creationDigest)q=q.where('departmentId','==',master.id);q=q.orderBy('__name__').limit(20);
     if(cursor) {if(!/^[A-Za-z0-9_-]{1,128}$/.test(cursor)) fail('Invalid cursor.');q=q.startAfter(db.doc(`students/${cursor}`));}
     const results=[];
     do {

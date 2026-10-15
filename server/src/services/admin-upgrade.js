@@ -1,3 +1,5 @@
+import {isMentor} from '../../../js/capabilities.js';
+import {retireHodAuthority} from './account-authority.js';
 import {eligibleConfigurationAccount} from './configuration-accounts.js';
 import {assertUniqueDepartment,departmentNameKey} from './department-uniqueness.js';
 import {createHash,randomUUID} from 'node:crypto';
@@ -11,48 +13,24 @@ const manager=async(db,actor,superOnly=false)=>{const u=await db.collection('use
 export async function auditAdmin(db,session,actor,action,departmentId,targets,summary,extra={}){
  await db.collection('superAdminAudit').insertOne({_id:randomUUID(),actorUid:actor.uid,actorId:actor.uid,actorRole:actor.role,departmentId:departmentId||null,action,targets,timestamp:new Date(),summary,...extra},{session});
 }
-export async function createDepartmentWithAdmin({database,client,auth,demo,actor,input,provisionerFactory}){
+export async function createDepartmentWithAdmin({database,client,actor,input}){
  actor=await manager(database,actor,true);
  const code=String(input.code||'').trim().toUpperCase(),name=String(input.name||'').trim(),requestId=input.requestId;
  if(!/^[A-Z0-9_-]{1,30}$/.test(code)||!name||name.length>150||!['active','inactive'].includes(input.status))fail('Valid department name, code and status are required.');
  if(!/^[A-Za-z0-9_-]{8,100}$/.test(requestId||''))fail('A stable department request ID is required.');
- const jobId=hash(actor.uid+':'+requestId),id='dept_'+jobId.slice(0,32),job=await database.collection('departmentProvisioningJobs').findOne({_id:jobId});
- await assertUniqueDepartment(database,{code,name,id});
- const admin=input.initialAdmin||{},email=String(admin.email||'').trim().toLowerCase(),employeeId=String(admin.employeeId||'').trim().toUpperCase();
- if(!String(admin.name||'').trim()||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!/^[A-Z0-9_-]{1,80}$/.test(employeeId))fail('Initial Admin name, college email and employee ID are required.');
+ const id='dept_'+hash(actor.uid+':'+requestId).slice(0,32);await assertUniqueDepartment(database,{code,name,id});
+ if(input.initialAdmin)fail('Create the department first, then explicitly assign its Admin in Department Setup.');
  const schemeIds=[...new Set(input.schemeIds||[])],sections=[...new Set((input.sections||[]).map(v=>String(v).trim().toUpperCase()))];
  if(!schemeIds.length||!sections.length||sections.some(v=>! /^[A-Z0-9-]{1,10}$/.test(v)))fail('Choose applicable schemes and sections.');
  for(const sid of schemeIds)if(!await database.collection('schemes').findOne({_id:sid,status:'active'}))fail('Choose active schemes.');
- const digest=hash(JSON.stringify({code,name,status:input.status,email,employeeId,adminName:admin.name,phone:admin.phone||'',schemeIds,sections}));
- if(job&&job.digest!==digest)fail('This retry belongs to a different department request.','already-exists');
- if(job?.state==='complete')return database.collection('departments').findOne({_id:id});
- const policy=await database.collection('institutionPolicy').findOne({_id:'institution'})||{},domain=email.split('@')[1];
- if(!(domain==='demo.test'&&(demo||policy.demoStaffProvisioningEnabled))&&!(policy.allowedDomains||[]).includes(domain))fail('Admin email domain is not allowed.');
- const ownedRequest='department-admin-'+jobId.slice(0,40),expectedUid='p_'+hash(actor.uid+':'+ownedRequest).slice(0,48);
- const existing=await database.collection('users').findOne({$or:[{email},{facultyId:employeeId}]});if(existing&&existing._id!==expectedUid)fail('Initial Admin identity already belongs to an existing account.','already-exists');
- try{const existingAuth=await auth.getUserByEmail(email);if(existingAuth.uid!==expectedUid)fail('Admin email already belongs to another Firebase identity.','already-exists');}catch(e){if(e.code!=='auth/user-not-found')throw e;}
- const session=client.startSession();try{await session.withTransaction(async()=>{
-  await assertUniqueDepartment(database,{code,name,id,session});const previous=await database.collection('departmentProvisioningJobs').findOne({_id:jobId},{session});if(previous&&previous.digest!==digest)fail('Department operation conflict.');
-  await database.collection('departmentProvisioningJobs').updateOne({_id:jobId},{$setOnInsert:{actorUid:actor.uid,digest,departmentId:id,expectedAdminUid:expectedUid,state:'reserved',createdAt:new Date(),retryInput:{code,name,status:input.status,requestId,schemeIds,sections,initialAdmin:{name:admin.name,email,employeeId,phone:String(admin.phone||'')}}}},{upsert:true,session});
-  await database.collection('departments').updateOne({_id:id},{$setOnInsert:{code,name,codeKey:code.toLowerCase(),nameKey:departmentNameKey(name),status:'provisioning',createdAt:new Date(),updatedAt:new Date(),schemeIds,sections}},{upsert:true,session});
+ const digest=hash(JSON.stringify({code,name,status:input.status,schemeIds,sections})),session=client.startSession();
+ try{await session.withTransaction(async()=>{
+  const previous=await database.collection('departments').findOne({_id:id},{session});if(previous){if(previous.creationDigest!==digest)fail('Department request ID belongs to different details.','already-exists');return;}
+  await assertUniqueDepartment(database,{code,name,id,session});
+  await database.collection('departments').insertOne({_id:id,code,name,codeKey:code.toLowerCase(),nameKey:departmentNameKey(name),status:input.status,setupStatus:'incomplete',schemeIds,sections,creationDigest:digest,createdAt:new Date(),updatedAt:new Date()},{session});
+  await auditAdmin(database,session,actor,'DEPARTMENT_CREATED',id,[id],'Empty department master created. Leadership and academic setup require explicit actions.');
  });}finally{await session.endSession();}
- try{
-  const provisioner=provisionerFactory?provisionerFactory({departmentBootstrap:{id,code}}):createProvisioner({db:new DocumentStore(database,client),auth,demo,departmentBootstrap:{id,code}});
-  const account=await provisioner.dispatch(actor.uid,{action:'provision',row:{role:'admin',scope:'department',department:code,name:String(admin.name).trim(),collegeEmail:email,facultyId:employeeId,phone:String(admin.phone||'')},requestId:ownedRequest});
-  const [firebase,user]=await Promise.all([auth.getUser(account.uid),database.collection('users').findOne({_id:account.uid})]);
-  if(firebase.uid!==expectedUid||firebase.email!==email||firebase.disabled||user?.role!=='admin'||user.departmentId!==id)fail('Provisioned Admin identity failed verification.');
-  const final=client.startSession();try{await final.withTransaction(async()=>{
-   const state=await database.collection('departmentProvisioningJobs').findOne({_id:jobId},{session:final});if(state.state==='complete')return;
-   await database.collection('departments').updateOne({_id:id},{$set:{status:input.status,adminId:account.uid,departmentAdminId:account.uid,updatedAt:new Date()}},{session:final});
-   for(const sid of schemeIds)await database.collection('schemes').updateOne({_id:sid,scope:'department'},{$addToSet:{departmentIds:id}},{session:final});
-   await database.collection('departmentProvisioningJobs').updateOne({_id:jobId},{$set:{state:'complete',adminUid:account.uid,completedAt:new Date()}},{session:final});
-   await auditAdmin(database,final,actor,'DEPARTMENT_CREATED',id,[id],'Department and initial administrator created.');
-   await auditAdmin(database,final,actor,'DEPARTMENT_ADMIN_CREATED',id,[account.uid],'Initial department administrator provisioned.');
-  });}finally{await final.endSession();}
-  // Attach only unambiguous legacy references; never touch identity or history fields.
-  const plan=await migrateDepartmentMaster(database,client);for(const c of plan.changes.filter(c=>c.fields.departmentId===id))await database.collection(c.collection).updateOne({_id:c.id,departmentId:{$exists:false}},{$set:c.fields});
-  return database.collection('departments').findOne({_id:id});
- }catch(e){await database.collection('departmentProvisioningJobs').updateOne({_id:jobId,state:{$ne:'complete'}},{$set:{state:'retry_required',updatedAt:new Date(),errorCode:String(e.code||'provisioning-failed')}});fail('Department setup is incomplete and remains unavailable. Retry the same validated request to resume safely. '+e.message,e.code||'failed-precondition');}
+ return database.collection('departments').findOne({_id:id});
 }
 export async function replaceLeadership({database,client,auth,actor,input,provisioner}){
  actor=await manager(database,actor,true);const {departmentId,position}=input;if(!['admin','hod'].includes(position))fail('Choose Admin or HOD.');
@@ -67,9 +45,9 @@ export async function replaceLeadership({database,client,auth,actor,input,provis
  const session=client.startSession();let previous;try{await session.withTransaction(async()=>{
   const fresh=await database.collection('departments').findOne({_id:dep._id},{session}),field=position==='admin'?'adminId':'hodId';previous=fresh[field]|| (position==='hod'?(await database.collection('departmentWorkflows').findOne({_id:dep._id},{session}))?.hodId:null);
   if(previous===uid)return;
-  await database.collection('users').updateOne({_id:uid},{$set:{role:position,scope:'department',departmentId:dep._id,department:dep.code}},{session});
+  await database.collection('users').updateOne({_id:uid},{$set:{...(position==='hod'&&candidate.role!=='hod'?{leadershipPreviousRole:candidate.role}:{}),role:position,scope:'department',departmentId:dep._id,department:dep.code}},{session});
   await database.collection('departments').updateOne({_id:dep._id},{$set:{[field]:uid,...(position==='admin'?{departmentAdminId:uid}:{}),updatedAt:new Date()}},{session});
-  if(position==='hod'){await database.collection('departmentWorkflows').updateOne({_id:dep._id},{$set:{departmentId:dep._id,hodId:uid}},{upsert:true,session});if(dep.code==='ISE')await database.collection('institutionPolicy').updateOne({_id:'workflow'},{$set:{hodId:uid}},{session});}
+  if(position==='hod'){if(previous)await retireHodAuthority(database,session,previous,dep._id,uid);await database.collection('departmentWorkflows').updateOne({_id:dep._id},{$set:{departmentId:dep._id,hodId:uid}},{upsert:true,session});if(dep.code==='ISE')await database.collection('institutionPolicy').updateOne({_id:'workflow'},{$set:{hodId:uid}},{session});}
   const change={_id:randomUUID(),departmentId:dep._id,position,oldId:previous||null,newId:uid,changedBy:actor.uid,timestamp:new Date()};await database.collection('departmentLeadershipHistory').insertOne(change,{session});
   await auditAdmin(database,session,actor,position==='admin'?'DEPARTMENT_ADMIN_REPLACED':previous?'HOD_REPLACED':'HOD_ASSIGNED',dep._id,[previous,uid].filter(Boolean),'Leadership changed; historical approvals remain attributed to their original actors.',{oldId:previous||null,newId:uid});
  });}finally{await session.endSession();}return {saved:true,oldId:previous||null,newId:uid};
@@ -81,7 +59,7 @@ async function checkCurrentResponsibilities(db,target,session){
  if(target.role==='student'||target.role==='admin')return;
  const options={session};
  if(await db.collection('offerings').countDocuments({teacherId:target._id,active:{$ne:false}},options)||await db.collection('enrollments').countDocuments({teacherId:target._id,active:true},options))fail('Reassign active classes before deactivation.');
- if(target.role==='mentor'&&await db.collection('students').countDocuments({mentorId:target._id,accountStatus:{$nin:['inactive','deleted','deactivating']}},options))fail('Reassign active mentees before deactivation.');
+ if(isMentor(target)&&await db.collection('students').countDocuments({mentorId:target._id,accountStatus:{$nin:['inactive','deleted','deactivating']}},options))fail('Reassign active mentees before deactivation.');
  if(await db.collection('departmentWorkflows').countDocuments({$or:[{hodId:target._id},{officeId:target._id},{library:target._id},{accounts:target._id}]},options))fail('Replace current workflow responsibilities before deactivation.');
  const requests=await db.collection('noDueRequests').find({status:{$in:['pending_stage1','pending_mentor','pending_hod','pending_office','rejected','cleared']},$or:[{approverIds:target._id},{mentorId:target._id},{hodId:target._id},{officeId:target._id}]},options).toArray();
  if(requests.some(r=>r.hodId===target._id&&r.hodApproval?.status!=='approved'||r.mentorId===target._id&&r.mentorApproval?.status!=='approved'||r.officeId===target._id||Object.entries(r.approvalItems||{}).some(([key,item])=>item.approverId===target._id&&r.approvalStates?.[key]!=='approved')))fail('Resolve pending approvals before deactivation.');

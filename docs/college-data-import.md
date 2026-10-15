@@ -31,7 +31,7 @@ employee_id,name,college_email,phone,department_code,is_mentor
 Subject (`templates/subject-import.csv`):
 
 ```csv
-subject_code,subject_name,department_code,semester,scheme
+subject_code,subject_name,department_code,semester,scheme,credits,active
 ```
 
 Faculty assignment (`templates/faculty-assignment-import.csv`):
