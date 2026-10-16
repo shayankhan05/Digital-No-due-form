@@ -1,4 +1,4 @@
-import {isMentor} from '../../../js/capabilities.js';
+import {isMentor,isFaculty,hasRole} from '../../../js/capabilities.js';
 import {sectionMaster} from './section-master.js';
 import {departmentCode} from '../../../js/department.js';
 import {isManager} from './roles.js';
@@ -37,7 +37,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   async function resolve(field,value,roleSet) {
     if(!text(value)) return null;
     const found=await db.collection('users').where(field,'==',field==='email'?email(value):text(value)).limit(2).get();
-    if(found.size!==1 || !roleSet.includes(found.docs[0].data().role) || isInactive(found.docs[0].data())) fail(`No unique ${roleSet.join('/')} account for ${field}: ${value}.`);
+    if(found.size!==1 || !hasRole(found.docs[0].data(),roleSet) || isInactive(found.docs[0].data())) fail(`No unique ${roleSet.join('/')} account for ${field}: ${value}.`);
     return {...found.docs[0].data(),uid:found.docs[0].id};
   }
   async function mentor(row) {
@@ -261,7 +261,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     const requirements=[...services.map(role=>[config[role],role]),[student.mentorId,'mentor'],[config.hodId,'hod'],[config.officeId,'office'],...offerings.map(o=>[o.teacherId,'teaching'])];
     const ids=[...new Set(requirements.map(([id])=>id).filter(Boolean))],users=new Map((await db.collection('users').where('__name__','in',ids).get()).docs.map(d=>[d.id,d.data()]));
     for(const o of offerings.filter(o=>matchesStudent(student,o)))items['subject_'+o.id]=subjectItem(student.uid||'',student,o,users.get(o.teacherId)||{});
-    for(const [id,role]of requirements){const user=users.get(id);if(!user||isInactive(user)||(role==='teaching'?!['subject_faculty','mentor'].includes(user.role):role==='mentor'?!isMentor(user):user.role!==role))fail('Invalid '+role+' workflow assignment.');}
+    for(const [id,role]of requirements){const user=users.get(id);if(!user||isInactive(user)||(role==='teaching'?!isFaculty(user):role==='mentor'?!isMentor(user):user.role!==role))fail('Invalid '+role+' workflow assignment.');}
     return {valid:true,workflowVersion:3,items,initialStates:Object.fromEntries(Object.keys(items).map(k=>[k,'pending'])),approverIds:[...new Set(Object.values(items).map(i=>i.approverId))],mentorId:student.mentorId,hodId:config.hodId,officeId:config.officeId,semester:student.semester,section:student.section,updatedAt:stamp()};
   }
   async function mapStudent(uid,student,offerings,{preserveExisting=false}={}) {

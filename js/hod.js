@@ -1,3 +1,4 @@
+import {isFaculty,isMentor} from './capabilities.js';
 import {departmentLabel} from './department.js';
 import {createRejectionEditor} from './rejection-editor.js';
 const rejectionEditor = createRejectionEditor(document.getElementById('content'));
@@ -45,6 +46,8 @@ window.addEventListener("pagehide", () => unsubscribeRequests?.());
 // ============================================================
 
 requireAuth(["hod"]).then((hod) => {
+  if(isFaculty(hod)){const links=document.createElement('div');links.className='provision-actions';const teaching=document.createElement('a');teaching.className='btn-sm';teaching.href='academic.html#teaching';teaching.textContent='My teaching';links.append(teaching);if(isMentor(hod)){const mentees=document.createElement('a');mentees.className='btn-sm';mentees.href='mentor-dashboard.html';mentees.textContent='My mentees';links.append(mentees);}header.after(links);}
+
 
   currentHod = hod;
 

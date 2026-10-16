@@ -76,7 +76,19 @@ export function departmentRoutes(app,{database,client,createDepartment}){
   ]);
   res.json({institutionServices:services,sections:sectionMaster(policy||{}),departments,schemes:schemes.filter(isVisibleScheme),leadershipAccounts:leadership.map(u=>({uid:u._id,name:u.name,email:u.email,role:u.role,departmentId:u.departmentId,facultyId:u.facultyId,accountStatus:u.accountStatus||'active',eligible:eligibleConfigurationAccount(u)})),workflowAccounts:workflow.filter(u=>eligibleConfigurationAccount(u)&&(req.actor.role==='super_admin'||u.scope==='institution'||u.departmentId===req.actor.managementDepartmentId)).map(u=>({uid:u._id,name:u.name,email:u.email,role:u.role,scope:u.scope,departmentId:u.departmentId}))});
  });
- app.get('/api/administration/leadership-candidates',async(req,res)=>{if(req.actor.role!=='super_admin')fail('Only Super Admin assigns leadership.','permission-denied');const id=req.actor.managementDepartmentId||req.query.departmentId;if(!id)fail('Select a department.');const position=req.query.position;if(!['admin','hod'].includes(position))fail('Choose a leadership position.');const term=String(req.query.term||'').trim(),page=Math.max(1,Number(req.query.page)||1);if(term.length>150||!Number.isSafeInteger(page)||page>10000)fail('Invalid search.');const match={departmentId:id,role:{$in:[position,'subject_faculty','mentor']},accountStatus:{$nin:['inactive','deleted','deactivating','deleting']}};if(term){const regex=term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');match.$or=['name','email','facultyId'].map(f=>({[f]:{$regex:regex,$options:'i'}}));}const [rows,total]=await Promise.all([database.collection('users').find(match).sort({name:1,_id:1}).skip((page-1)*25).limit(25).toArray(),database.collection('users').countDocuments(match)]);res.json({rows:rows.filter(eligibleConfigurationAccount).map(u=>({uid:u._id,name:u.name,email:u.email,facultyId:u.facultyId,role:u.role,departmentId:u.departmentId})),total,page,pages:Math.ceil(total/25)});});
+ app.get('/api/administration/leadership-candidates',async(req,res)=>{
+  if(req.actor.role!=='super_admin')fail('Only Super Admin assigns leadership.','permission-denied');
+  const id=req.actor.managementDepartmentId||req.query.departmentId,dep=id&&await database.collection('departments').findOne({_id:id});
+  if(!dep)fail('Select an existing department.');
+  const position=req.query.position;if(!['admin','hod'].includes(position))fail('Choose a leadership position.');
+  const term=String(req.query.term||'').trim(),page=Math.max(1,Number(req.query.page)||1);if(term.length>150||!Number.isSafeInteger(page)||page>10000)fail('Invalid search.');
+  const match={departmentId:id,role:{$in:[position,'subject_faculty','mentor']},accountStatus:{$nin:['inactive','deleted','deactivating','deleting']},authDisabled:{$ne:true},configurationSelectable:{$ne:false}};
+  const current=position==='hod'?dep.hodId:dep.adminId||dep.departmentAdminId;if(current)match._id={$ne:current};
+  if(term){const regex=term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');match.$or=['name','email','facultyId'].map(f=>({[f]:{$regex:regex,$options:'i'}}));}
+  // Filter before paging so hidden/ineligible accounts cannot hide real candidates.
+  const eligible=(await database.collection('users').find(match).sort({name:1,_id:1}).toArray()).filter(eligibleConfigurationAccount),total=eligible.length;
+  res.json({rows:eligible.slice((page-1)*25,page*25).map(u=>({uid:u._id,name:u.name,email:u.email,facultyId:u.facultyId,role:u.role,departmentId:u.departmentId})),total,page,pages:Math.ceil(total/25)});
+ });
  app.post('/api/administration/department-retry',async(req,res)=>{if(req.actor.role!=='super_admin')fail('Only Super Admin manages department setup.','permission-denied');fail('Automatic initial Admin provisioning is disabled. Open Department Setup and assign leadership explicitly.','failed-precondition');});
  app.post('/api/administration/master',async(req,res)=>{
  if(req.actor.role!=='super_admin')fail('Only Super Admin manages departments and schemes.','permission-denied');

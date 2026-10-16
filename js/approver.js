@@ -1,3 +1,4 @@
+import {isFaculty} from './capabilities.js';
 import {departmentLabel} from './department.js';
 import {createRejectionEditor} from './rejection-editor.js';
 const rejectionEditor = createRejectionEditor(document.getElementById('content'));
@@ -61,7 +62,7 @@ requireAuth(["subject_faculty", "library", "physics_lab", "chemistry_lab", "acco
     `${approver.name} · ${ROLE_LABELS[approver.role] || approver.role}` +
     `${approver.subjectCode ? " (" + approver.subjectCode + ")" : ""}`;
 
-  if(["subject_faculty","mentor"].includes(approver.role)) {
+  if(isFaculty(approver)) {
     let cursor=null,more=true;
     while(more) {const result=await academicPage("offerings",[["teacherId","==",approver.uid]],cursor,50);result.rows.filter(o=>o.active!==false).forEach(o=>taughtOfferings.add(o.id));cursor=result.cursor;more=result.more;}
   }

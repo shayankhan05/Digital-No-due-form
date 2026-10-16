@@ -16,7 +16,7 @@ let actor, cursor, rows = [], classLoadVersion = 0;
 window.addEventListener("hashchange", () => { if (isMentor(actor) && location.hash === "#teaching") listClasses().catch(error => errorState(content,error)); });
 requireAuth(["student", "subject_faculty", "mentor", "admin", "super_admin"]).then(async profile => {
   actor = profile;
-  document.getElementById("backLink").href = ({ student: "student-dashboard.html", subject_faculty: "approver-dashboard.html", mentor: "mentor-dashboard.html", admin: "admin-dashboard.html", super_admin: "super-admin-dashboard.html" })[actor.role];
+  document.getElementById("backLink").href = ({ student: "student-dashboard.html", subject_faculty: "approver-dashboard.html", mentor: "mentor-dashboard.html", hod: "hod-dashboard.html", admin: "admin-dashboard.html", super_admin: "super-admin-dashboard.html" })[actor.role];
   const uid = new URLSearchParams(location.search).get("student");
   if (actor.role === "student" || uid) return showStudent(actor.role === "student" ? actor.uid : uid);
   if ((actor.role==='mentor'||isMentor(actor)&&location.hash==='#mentees') && location.hash !== "#teaching") return listMentees();

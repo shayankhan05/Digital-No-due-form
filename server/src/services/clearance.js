@@ -1,4 +1,4 @@
-import {isMentor} from '../../../js/capabilities.js';
+import {isMentor,isFaculty} from '../../../js/capabilities.js';
 import {departmentCode} from '../../../js/department.js';
 import {isInactive} from './account-removal.js';
 import {FieldValue} from './values.js';
@@ -29,7 +29,7 @@ export async function enrollmentPlan(db,uid) {
     const e=row.data(),snap=await db.doc(`offerings/${e.offeringId}`).get(),o={...snap.data(),id:snap.id};
     if(!snap.exists || !matchesStudent(student,o)) continue;
     const teacher=(await db.doc(`users/${o.teacherId}`).get()).data();
-    if(!teacher || !['subject_faculty','mentor'].includes(teacher.role) || e.teacherId!==o.teacherId) throw new Error('An enrolled subject has an invalid teacher mapping. Ask the administrator to refresh it.');
+    if(!teacher || !isFaculty(teacher) || e.teacherId!==o.teacherId) throw new Error('An enrolled subject has an invalid teacher mapping. Ask the administrator to refresh it.');
     const identity=[String(o.subjectCode).trim().toUpperCase(),o.teacherId,Number(o.semester),text(o.section).toUpperCase(),department(o.department||student.department),text(o.scheme||student.scheme)].join('|');
     if(Object.values(items).some(i=>i.subjectIdentity===identity))continue;
     items[`subject_${o.id}`]={...subjectItem(uid,student,o,teacher),subjectIdentity:identity,enrollmentId:row.id};
