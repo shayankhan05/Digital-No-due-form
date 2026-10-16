@@ -25,6 +25,8 @@ export function authenticationRoutes(app,{database,store,auth,demo,key}){
 export async function completePasswordChange({store,auth,actor,demo,key,token}){
   if(!actor.mustChangePassword)return {changed:true};
   const lookup=await firebasePasswordCall(auth,demo,key,'lookup',{idToken:token}),user=lookup.result.users?.[0],issued=actor.temporaryPasswordIssuedAt;
-  if(!lookup.ok||user?.localId!==actor.uid||!user.passwordUpdatedAt||Number(user.passwordUpdatedAt)<=new Date(issued).getTime())throw Object.assign(new Error('Change your temporary password through Firebase before continuing.'),{code:'permission-denied'});
+  // Local Auth emulator and application clocks can differ by 1 ms on Windows.
+  // Keep the production comparison exact; an unchanged local password is not a change.
+  if(!lookup.ok||user?.localId!==actor.uid||!user.passwordUpdatedAt||Number(user.passwordUpdatedAt)<=new Date(issued).getTime()+(demo?5:0))throw Object.assign(new Error('Change your temporary password through Firebase before continuing.'),{code:'permission-denied'});
   await store.doc(`users/${actor.uid}`).set({mustChangePassword:false,passwordChangedAt:new Date()},{merge:true});return {changed:true};
 }
