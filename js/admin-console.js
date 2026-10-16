@@ -27,16 +27,21 @@ export async function mountLeadership(host,actor,masters,current){
   if(current&&current!==d._id){sessionStorage.setItem('department-context:'+actor.uid,d._id);location.reload();return;}
   const editor=host.querySelector('#leadershipEditor'),status=host.querySelector('#leadershipStatus');status.textContent='';
   editor.innerHTML=`<h3>Change ${title} · ${e(d.name)}</h3><form id="leadershipSearch"><label>Find Eligible Staff<input name="term" type="search" placeholder="Name / Employee ID / Email"></label><button type="submit" class="btn-sm">Search staff</button></form><div id="leadershipResults" aria-live="polite"></div><div class="provision-actions" id="leadershipPager"><button type="button" class="btn-sm" data-prev>Previous staff</button><span role="status" aria-live="polite"></span><button type="button" class="btn-sm" data-next>Next staff</button></div><form id="leadershipForm"><label>${position==='admin'?'Select Existing Eligible Staff':'Select Existing Eligible Faculty'}<select name="uid" required><option value="">Select existing ${position==='admin'?'staff':'faculty'}</option></select></label><div id="selectedLeaderSummary" role="status" hidden></div><fieldset id="newLeaderFields" hidden disabled><legend>Create New ${title}</legend><label>Name<input name="name" required></label><label>College email<input name="collegeEmail" type="email" required></label><label>Employee ID<input name="facultyId" required></label><label>Phone<input name="phone"></label></fieldset><button type="submit" class="btn-primary" disabled>Assign ${title}</button></form><p>Previous assignments and approval history are preserved.</p>`;
-  const f=editor.querySelector('#leadershipForm'),search=editor.querySelector('#leadershipSearch'),pager=editor.querySelector('#leadershipPager'),select=f.elements.uid,results=editor.querySelector('#leadershipResults'),summary=editor.querySelector('#selectedLeaderSummary'),assign=f.querySelector('[type=submit]');let page=1,timer,version=0,rows=[];
+  const f=editor.querySelector('#leadershipForm'),search=editor.querySelector('#leadershipSearch'),pager=editor.querySelector('#leadershipPager'),select=f.elements.uid,results=editor.querySelector('#leadershipResults'),summary=editor.querySelector('#selectedLeaderSummary'),assign=f.querySelector('[type=submit]');let page=1,version=0,rows=[],submittedTerm='';
   select.onchange=()=>{
    const fields=f.querySelector('fieldset'),selected=rows.find(p=>p.uid===select.value);fields.hidden=fields.disabled=select.value!=='__new__';assign.disabled=!select.value;
    summary.hidden=!selected;summary.innerHTML=selected?`<h4>Selected ${position==='hod'?'faculty':'staff'}</h4><dl class="person-details"><dt>Name</dt><dd>${e(selected.name)}</dd><dt>Employee ID</dt><dd>${e(selected.facultyId||'Not recorded')}</dd><dt>Email</dt><dd>${e(selected.email)}</dd><dt>Status</dt><dd>Active</dd><dt>Department</dt><dd>${e(d.name)}</dd></dl>`:'';
   };
+  const resetSearch=()=>{
+   version++;page=1;submittedTerm='';rows=[];status.textContent='';results.innerHTML='<p>Search by name, employee ID or email.</p>';pager.hidden=true;pager.querySelector('span').textContent='';
+   select.replaceChildren(new Option('Select existing '+(position==='admin'?'staff':'faculty'),''),new Option('Create New '+title,'__new__'));select.onchange();
+  };
   const load=async()=>{
+   if(!submittedTerm){resetSearch();return;}
    const run=++version,previous=select.value;pager.querySelector('span').textContent='Loading eligible staff…';results.innerHTML='<p role="status">Loading eligible staff…</p>';status.textContent='';
-   const result=await apiFetch('/api/administration/leadership-candidates?'+new URLSearchParams({position,departmentId:d._id,term:search.elements.term.value,page}));
+   let result;try{result=await apiFetch('/api/administration/leadership-candidates?'+new URLSearchParams({position,departmentId:d._id,term:submittedTerm,page}));}catch(err){if(run!==version||!f.isConnected)return;throw err;}
    if(run!==version||!f.isConnected)return;
-   rows=result.rows;
+   rows=result.rows;pager.hidden=!rows.length;
    results.innerHTML=rows.length?`<div class="table-scroll"><table><caption>Eligible staff · ${e(d.name)}</caption><thead><tr><th scope="col">Name</th><th scope="col">Employee ID</th><th scope="col">Email</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead><tbody>${rows.map(p=>`<tr><td>${e(p.name)}</td><td>${e(p.facultyId||'Not recorded')}</td><td>${e(p.email)}</td><td>Active</td><td><button type="button" class="btn-sm" data-select-leader="${e(p.uid)}" aria-label="Select ${e(p.name)}">Select</button></td></tr>`).join('')}</tbody></table></div>`:'<p>No eligible faculty found.</p>';
    results.querySelectorAll('[data-select-leader]').forEach(button=>button.onclick=()=>{select.value=button.dataset.selectLeader;select.dispatchEvent(new Event('change'));});
    select.replaceChildren(new Option('Select existing '+(position==='admin'?'staff':'faculty'),''),...result.rows.map(p=>new Option(p.name+' — '+(p.facultyId||p.email),p.uid)),new Option('Create New '+title,'__new__'));
@@ -44,12 +49,12 @@ export async function mountLeadership(host,actor,masters,current){
    select.onchange();pager.querySelector('span').textContent=result.total?result.total+' eligible · Page '+page+' of '+Math.max(1,result.pages):'No eligible faculty found in this department.';
    pager.querySelector('[data-prev]').disabled=page<=1;pager.querySelector('[data-next]').disabled=page>=result.pages;
   };
-  const showError=err=>{status.textContent=err.message;results.replaceChildren();pager.querySelector('span').textContent='Unable to load eligible staff.';};
-  const searchNow=()=>{clearTimeout(timer);page=1;load().catch(showError);};
-  search.onsubmit=ev=>{ev.preventDefault();searchNow();};search.elements.term.oninput=()=>{clearTimeout(timer);timer=setTimeout(searchNow,300);};
+  const showError=err=>{status.textContent=err.message;results.replaceChildren();pager.hidden=true;};
+  const searchNow=()=>{const term=search.elements.term.value.trim();if(!term){resetSearch();return;}submittedTerm=term;page=1;load().catch(showError);};
+  search.onsubmit=ev=>{ev.preventDefault();searchNow();};search.elements.term.oninput=resetSearch;
   for(const[key,delta]of [['prev',-1],['next',1]])pager.querySelector('[data-'+key+']').onclick=()=>{page+=delta;load().catch(showError);};
   const requestId=crypto.randomUUID();f.onsubmit=ev=>{ev.preventDefault();busy(f.querySelector('[type=submit]'),async()=>{try{const data=Object.fromEntries(new FormData(f)),create=data.uid==='__new__';if(!data.uid)return;await post('/api/administration/leadership',{departmentId:d._id,position,uid:create?undefined:data.uid,newAccount:create?{name:data.name,collegeEmail:data.collegeEmail,facultyId:data.facultyId,phone:data.phone}:undefined,requestId});location.reload();}catch(err){status.textContent=err.message;}});};
-  editor.scrollIntoView({block:'center'});await load().catch(showError);
+  resetSearch();editor.scrollIntoView({block:'center'});
  });
  const loadAudit=async()=>{const query=new URLSearchParams(new FormData(host.querySelector('#auditFilter')));if(current)query.set('departmentId',current);const data=await apiFetch('/api/administration/audit?'+query);host.querySelector('#auditRows').innerHTML=`<div class="table-scroll"><table><thead><tr><th>Time</th><th>Action</th><th>Actor</th><th>Summary</th></tr></thead><tbody>${data.rows.map(r=>`<tr><td>${e(new Date(r.timestamp).toLocaleString())}</td><td>${e(auditActionLabel(r.action))}</td><td>${e(r.actorRole||'')} ${e(r.actorUid||r.actorId)}</td><td>${e(r.summary||r.target)}</td></tr>`).join('')}</tbody></table></div>`;};host.querySelector('#showAudit').onclick=ev=>busy(ev.target,async()=>{host.querySelector('#auditPanel').hidden=false;await loadAudit();});host.querySelector('#auditFilter').onsubmit=ev=>{ev.preventDefault();busy(ev.target.querySelector('button'),loadAudit);};
 }
