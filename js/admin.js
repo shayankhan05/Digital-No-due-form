@@ -1,3 +1,4 @@
+if(!['localhost','127.0.0.1'].includes(location.hostname)||new URLSearchParams(location.search).get('maintenance')!=='1'){location.replace('admin-dashboard.html');throw new Error('Internal maintenance is available only in explicit local maintenance mode.');}
 import {mountAcademicSelects} from './master-controls.js';
 import {roleLabel,accountLabel} from './display-labels.js';
 import {departmentLabel} from './department.js';

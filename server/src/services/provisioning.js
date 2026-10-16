@@ -321,12 +321,13 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     const uid=`p_${hash(`${caller}:${requestId}`).slice(0,48)}`,jobRef=db.doc(`provisioningJobs/${uid}`),old=(await jobRef.get()).data();
     const p=await policy();
     const {row,warnings}=await validate(input,{uid:old?uid:null,p});
-    const digest=hash(JSON.stringify({email:row.collegeEmail,role:row.role,usn:row.usn || '',facultyId:row.facultyId,name:row.name,department:row.department,semester:row.semester || '',section:row.section || '',scheme:row.scheme,mentorId:row.mentorId || '',phone:row.phone}));
+    const digest=hash(JSON.stringify({email:row.collegeEmail,role:row.role,usn:row.usn || '',facultyId:row.facultyId,name:row.name,department:row.department,semester:row.semester || '',section:row.section || '',scheme:row.scheme,mentorId:row.mentorId || '',phone:row.phone,...(row.isMentor!==undefined?{isMentor:row.isMentor}:{})}));
     if(old && old.digest!==digest) fail('Retry ID already belongs to another row.','already-exists');
     if(row.existingUid && row.role!=='student') {
       const existingUid=row.existingUid,ref=db.doc(`users/${existingUid}`),keys=[['email',row.collegeEmail],['facultyId',row.facultyId],['loginId',row.facultyId]].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
       await db.runTransaction(async t=>{
         const profile=(await t.get(ref)).data();
+        if(row.isMentor===false&&profile?.isMentor&&!(await t.get(db.collection('students').where('mentorId','==',existingUid).limit(1))).empty)fail('Reassign mentees before removing mentor capability.');
         if(!profile||isInactive(profile)||profile.role!==row.role||email(profile.email)!==row.collegeEmail||text(profile.facultyId).toUpperCase()!==row.facultyId)fail('Staff identity changed during provisioning.','already-exists');
         const identities=await Promise.all(keys.map(key=>t.get(key)));
         if(identities.some(s=>s.exists&&s.data().uid!==existingUid))fail('Institutional identity reservation conflict.','already-exists');

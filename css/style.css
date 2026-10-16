@@ -1818,3 +1818,12 @@ body.super-admin-page .app-shell { width: 100%; max-width: 1500px !important; ma
 #sectionEditor[hidden] { display:none !important; }
 @media(max-width:1000px){.setup-summary-grid,.import-categories,.setup-progress{grid-template-columns:repeat(2,minmax(0,1fr));}.setup-summary-card:last-child{grid-column:auto;}.setup-steps{grid-template-columns:repeat(3,minmax(0,1fr));}}
 @media(max-width:600px){.setup-summary-grid,.import-categories,.setup-progress,.setup-steps{grid-template-columns:minmax(0,1fr);}.setup-summary-card,.setup-panel,.import-category{padding:14px;}.setup-metrics > div{gap:10px;}.setup-state{width:100%;}.setup-summary-card:last-child{grid-column:auto;}}
+/* Submission setup forms retain the established theme and bounded workspace. */
+#manualTeachingForm, #manualAccountCard #accountForm { display:grid; grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 20px;min-width:0; }
+:is(#sectionForm,#manualTeachingForm) > :is(h4,p,div) { grid-column:1 / -1;min-width:0; }
+:is(#manualAccountCard,#manualTeachingCard) details > summary { cursor:pointer;padding:12px 0;font-weight:600; }
+[data-super-section] > .import-category { margin:16px 0; }
+:is(#manualAccountCard,#manualTeachingCard,#collegeImport) label { min-width:0; }
+#schemeForm[hidden],label[hidden] { display:none !important; }
+@media(max-width:1000px){#manualTeachingForm,#manualAccountCard #accountForm{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:600px){#manualTeachingForm,#manualAccountCard #accountForm{grid-template-columns:minmax(0,1fr);}}

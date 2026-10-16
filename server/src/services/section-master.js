@@ -20,6 +20,7 @@ export async function saveSection(database,client,actor,input){
   const next=[...rows.filter(s=>s.code!==code),saved],active=next.filter(s=>s.status==='active').map(s=>s.code);
   if(!active.length)fail('Keep at least one active section.');
   await database.collection('institutionPolicy').updateOne({_id:'institution'},{$set:{sections:active,sectionRecords:next}},{upsert:true,session});
+  if(!old&&actor.managementDepartmentId)await database.collection('departments').updateOne({_id:actor.managementDepartmentId},{$addToSet:{sections:code},$set:{updatedAt:new Date()}},{session});
   await database.collection('superAdminAudit').insertOne({_id:randomUUID(),actorId:actor.uid,actorUid:actor.uid,actorRole:actor.role,action:!old?'SECTION_CREATED':input.status==='active'?'SECTION_ACTIVATED':'SECTION_DEACTIVATED',targets:[saved._id],timestamp:new Date(),summary:'Section '+code+' '+input.status+'. Existing assignments preserved.'},{session});
  });}finally{await session.endSession();}return saved;
 }
