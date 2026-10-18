@@ -33,12 +33,12 @@ export async function mountLeadership(host,actor,masters,current){
    summary.hidden=!selected;summary.innerHTML=selected?`<h4>Selected ${position==='hod'?'faculty':'staff'}</h4><dl class="person-details"><dt>Name</dt><dd>${e(selected.name)}</dd><dt>Employee ID</dt><dd>${e(selected.facultyId||'Not recorded')}</dd><dt>Email</dt><dd>${e(selected.email)}</dd><dt>Status</dt><dd>Active</dd><dt>Department</dt><dd>${e(d.name)}</dd></dl>`:'';
   };
   const resetSearch=(preserve=false)=>{const selected=preserve?selectedCandidate:null,previous=preserve?select.value:'';browse=false;allRows=[];browseButton.textContent='Show all eligible faculty';browseButton.setAttribute('aria-expanded','false');
-   version++;page=1;submittedTerm='';rows=[];status.textContent='';results.innerHTML='<p>Search by name, employee ID or email.</p>';pager.hidden=true;pager.querySelector('span').textContent='';
+   version++;page=1;submittedTerm='';rows=[];select.disabled=false;select.setAttribute('aria-busy','false');status.textContent='';results.innerHTML='<p>Search by name, employee ID or email.</p>';pager.hidden=true;pager.querySelector('span').textContent='';
    select.replaceChildren(new Option('Select existing '+(position==='admin'?'staff':'faculty'),''),...(selected?[new Option(selected.name+' — '+(selected.facultyId||selected.email),selected.uid)]:[]),new Option('Create New '+title,'__new__'));select.value=previous;select.onchange();
   };
   const load=async()=>{
    if(!browse&&!submittedTerm){resetSearch();return;}
-   const run=++version,previous=select.value;pager.querySelector('span').textContent='Loading eligible staff…';results.innerHTML='<p role="status">Loading eligible staff…</p>';status.textContent='';
+   const run=++version,previous=select.value;select.disabled=true;assign.disabled=true;select.setAttribute('aria-busy','true');pager.querySelector('span').textContent='Loading eligible staff…';results.innerHTML='<p role="status">Loading eligible staff…</p>';status.textContent='';
    const fetchPage=p=>apiFetch('/api/administration/leadership-candidates?'+new URLSearchParams({position,departmentId:d._id,term:submittedTerm,page:p}));
    let result;try{
     if(browse){
@@ -51,13 +51,14 @@ export async function mountLeadership(host,actor,masters,current){
    results.innerHTML=rows.length?`<div class="table-scroll"><table><caption>Eligible staff · ${e(d.name)}</caption><thead><tr><th scope="col">Name</th><th scope="col">Employee ID</th><th scope="col">Email</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead><tbody>${rows.map(p=>`<tr><td>${e(p.name)}</td><td>${e(p.facultyId||'Not recorded')}</td><td>${e(p.email)}</td><td>Active</td><td><button type="button" class="btn-sm" data-select-leader="${e(p.uid)}" aria-label="Select ${e(p.name)}">Select</button></td></tr>`).join('')}</tbody></table></div>`:'<p>No eligible faculty found.</p>';
    results.querySelectorAll('[data-select-leader]').forEach(button=>button.onclick=()=>{select.value=button.dataset.selectLeader;select.dispatchEvent(new Event('change'));});
    select.replaceChildren(new Option('Select existing '+(position==='admin'?'staff':'faculty'),''),...(browse?allRows:rows).map(p=>new Option(p.name+' — '+(p.facultyId||p.email),p.uid)),new Option('Create New '+title,'__new__'));
-   if([...select.options].some(o=>o.value===previous))select.value=previous;
+   select.disabled=false;select.setAttribute('aria-busy','false');if([...select.options].some(o=>o.value===previous))select.value=previous;
    select.onchange();pager.querySelector('span').textContent=result.total?result.total+' eligible · Page '+page+' of '+Math.max(1,result.pages):'No eligible faculty found in this department.';
    pager.querySelector('[data-prev]').disabled=page<=1;pager.querySelector('[data-next]').disabled=page>=result.pages;
   };
-  const showError=err=>{status.textContent=err.message;results.replaceChildren();pager.hidden=true;};
+  const showError=err=>{select.disabled=false;select.setAttribute('aria-busy','false');select.onchange();status.textContent=err.message;results.replaceChildren();pager.hidden=true;};
   const searchNow=()=>{const term=search.elements.term.value.trim();if(!term){resetSearch();return;}browse=false;allRows=[];browseButton.textContent='Show all eligible faculty';browseButton.setAttribute('aria-expanded','false');submittedTerm=term;page=1;load().catch(showError);};
-  search.onsubmit=ev=>{ev.preventDefault();searchNow();};search.elements.term.oninput=()=>resetSearch();
+  search.onsubmit=ev=>{ev.preventDefault();searchNow();};// Editing search text must not discard the independently loaded browse pool.
+  search.elements.term.oninput=()=>{if(!browse)resetSearch();};
   browseButton.onclick=()=>{if(browse){resetSearch(true);return;}browse=true;allRows=[];submittedTerm='';page=1;browseButton.textContent='Hide eligible faculty';browseButton.setAttribute('aria-expanded','true');load().catch(showError);};
   for(const[key,delta]of [['prev',-1],['next',1]])pager.querySelector('[data-'+key+']').onclick=()=>{page+=delta;load().catch(showError);};
   const requestId=crypto.randomUUID();f.onsubmit=ev=>{ev.preventDefault();busy(f.querySelector('[type=submit]'),async()=>{try{const data=Object.fromEntries(new FormData(f)),create=data.uid==='__new__';if(!data.uid)return;await post('/api/administration/leadership',{departmentId:d._id,position,uid:create?undefined:data.uid,newAccount:create?{name:data.name,collegeEmail:data.collegeEmail,facultyId:data.facultyId,phone:data.phone}:undefined,requestId});location.reload();}catch(err){status.textContent=err.message;}});};
