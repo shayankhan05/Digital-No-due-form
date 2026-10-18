@@ -55,7 +55,7 @@ export async function mountLeadership(host,actor,masters,current){
    select.onchange();pager.querySelector('span').textContent=result.total?result.total+' eligible · Page '+page+' of '+Math.max(1,result.pages):'No eligible faculty found in this department.';
    pager.querySelector('[data-prev]').disabled=page<=1;pager.querySelector('[data-next]').disabled=page>=result.pages;
   };
-  const showError=err=>{select.disabled=false;select.setAttribute('aria-busy','false');select.onchange();status.textContent=err.message;results.replaceChildren();pager.hidden=true;};
+  const showError=err=>{resetSearch(true);const message='Unable to load eligible faculty. '+(err.message||'Please try again.');status.textContent=message;results.innerHTML='<p role="alert">'+e(message)+'</p>';};
   const searchNow=()=>{const term=search.elements.term.value.trim();if(!term){resetSearch();return;}browse=false;allRows=[];browseButton.textContent='Show all eligible faculty';browseButton.setAttribute('aria-expanded','false');submittedTerm=term;page=1;load().catch(showError);};
   search.onsubmit=ev=>{ev.preventDefault();searchNow();};// Editing search text must not discard the independently loaded browse pool.
   search.elements.term.oninput=()=>{if(!browse)resetSearch();};
