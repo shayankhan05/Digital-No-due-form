@@ -2,7 +2,7 @@ import {optionalSemester} from '../../../js/semester.js';
 import {randomUUID} from 'node:crypto';
 import {sectionMaster} from './section-master.js';
 const fail=(message,code='invalid-argument')=>{throw Object.assign(new Error(message),{code});};
-const inactive=['inactive','deleted','deactivating','deleting'];
+const inactive=['inactive','deleted','deactivating','deleting','exited','exiting'];
 const escaped=value=>String(value||'').trim().replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 export function sectionDetailRoutes(app,{database,client}){
  const context=async actor=>{if(!['admin','super_admin'].includes(actor.role))fail('Administrator access required.','permission-denied');const dep=actor.managementDepartmentId&&await database.collection('departments').findOne({_id:actor.managementDepartmentId});if(!dep)fail('Select a department to manage section details.');return dep;};

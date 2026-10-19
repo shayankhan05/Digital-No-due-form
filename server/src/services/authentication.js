@@ -1,4 +1,4 @@
-import {isInactive} from './account-removal.js';
+import {accountStateError} from '../../../js/account-state.js';
 import {accountAuthority} from './account-authority.js';
 const invalid=()=>Object.assign(new Error('Email / USN / Employee ID or password is incorrect.'),{code:'unauthenticated'});
 export async function firebasePasswordCall(auth,demo,key,action,body){
@@ -12,14 +12,14 @@ export async function loginIdentity(database,identifier){
   const collation={locale:'en',strength:2};let candidates;
   if(value.includes('@'))candidates=await database.collection('users').find({email:value}).collation(collation).limit(3).toArray();
   else{const [students,staff]=await Promise.all([database.collection('students').find({usn:value}).collation(collation).limit(3).toArray(),database.collection('users').find({facultyId:value,role:{$ne:'student'}}).collation(collation).limit(3).toArray()]);const profiles=await Promise.all(students.map(s=>database.collection('users').findOne({_id:s._id,role:'student'})));candidates=[...profiles.filter(Boolean),...staff];}
-  const unique=new Map(candidates.map(p=>[p._id,p]));if(unique.size!==1)throw invalid();const profile=[...unique.values()][0];if(isInactive(profile))throw invalid();return accountAuthority(database,profile,profile._id);
+  const unique=new Map(candidates.map(p=>[p._id,p]));if(!unique.size)throw Object.assign(new Error('No user exists with this Email / USN / Employee ID.'),{code:'account/not-found'});if(unique.size!==1)throw invalid();const profile=[...unique.values()][0],state=accountStateError(profile);if(state)throw Object.assign(new Error(state.message),{code:state.code});return accountAuthority(database,profile,profile._id);
 }
 export function authenticationRoutes(app,{database,store,auth,demo,key}){
   const attempts=new Map();
   app.post('/api/auth/login',async(req,res)=>{
     const now=Date.now(),address=req.ip,old=attempts.get(address),budget=old&&old.until>now?old:{count:0,until:now+600000};budget.count++;attempts.set(address,budget);if(attempts.size>10000)for(const [ip,v]of attempts)if(v.until<now)attempts.delete(ip);
     if(budget.count>100)return res.status(429).json({error:{code:'too-many-requests',message:'Too many attempts. Wait a bit and try again.'}});
-    try{if(typeof req.body.password!=='string'||!req.body.password||req.body.password.length>4096)throw invalid();const p=await loginIdentity(database,req.body.identifier),signed=await firebasePasswordCall(auth,demo,key,'signInWithPassword',{email:p.email,password:req.body.password,returnSecureToken:true});if(!signed.ok||signed.result.localId!==p._id)throw invalid();res.json({email:p.email});}catch{res.status(401).json({error:{code:'unauthenticated',message:invalid().message}});}
+    try{if(typeof req.body.password!=='string'||!req.body.password||req.body.password.length>4096)throw invalid();const p=await loginIdentity(database,req.body.identifier),signed=await firebasePasswordCall(auth,demo,key,'signInWithPassword',{email:p.email,password:req.body.password,returnSecureToken:true});if(!signed.ok||signed.result.localId!==p._id)throw invalid();res.json({email:p.email});}catch(error){const state=['account/inactive','account/exited','account/not-found'].includes(error.code);res.status(401).json({error:{code:state?error.code:'unauthenticated',message:state?error.message:invalid().message}});}
   });
 }
 export async function completePasswordChange({store,auth,actor,demo,key,token}){

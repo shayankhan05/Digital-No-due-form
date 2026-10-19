@@ -1,5 +1,5 @@
 import {isInactive} from './account-removal.js';
-export const serviceFields={officeId:'office',library:'library',accounts:'accounts',physics_lab:'physics_lab',chemistry_lab:'chemistry_lab'};
+export const serviceFields={library:'library',accounts:'accounts',physics_lab:'physics_lab',chemistry_lab:'chemistry_lab'};
 export function eligibleConfigurationAccount(user){
  return !!user&&!isInactive(user)&&user.authDisabled!==true&&user.configurationSelectable!==false&&!!String(user.name||'').trim()&&!/^(?:[a-z]\d+|(?:test|placeholder)(?:[\s_-].*)?)$/i.test(String(user.name).trim());
 }

@@ -30,21 +30,23 @@ export function officeStatus(request){
 export async function searchOfficeStudents(db,uid,input={}){
   const fail=(code,message)=>{throw Object.assign(new Error(message),{code});};
   if(!uid)fail('unauthenticated','Sign in first.');
-  if((await db.doc(`users/${uid}`).get()).data()?.role!=='office')fail('permission-denied','Only Office may search students.');
+  const office=(await db.doc(`users/${uid}`).get()).data();if(office?.role!=='office'||isInactive(office))fail('permission-denied','Only Office may search students.');
   const term=normalizeSearch(input.term);if(!term||term.length>200)fail('invalid-argument','Enter a name, USN, student ID or college email (up to 200 characters).');
   const filters=input.filters||{};optionalSemester(filters.semester);for(const key of ['department','semester','section','usn','email'])if(String(filters[key]??'').length>200)fail('invalid-argument','Filter is too long.');
   const cursor=input.cursor||null;if(cursor&&!/^[A-Za-z0-9_-]{1,128}$/.test(cursor))fail('invalid-argument','Invalid search cursor.');
+  const historicalStudents=office.scope==='institution'?new Set((await db.collection('noDueRequests').where('officeId','==',uid).get()).docs.map(d=>d.data().studentId)):null;
   const index=db.collection('officeStudentSearch');let docs=[],more=false,nextCursor=null,mode='name';
   const direct=/^[A-Za-z0-9_-]{1,128}$/.test(String(input.term).trim())&&!cursor?await index.doc(String(input.term).trim()).get():null;
   if(direct?.exists){docs=[direct];mode='student ID';}
   else{
     mode=term.includes('@')?'email':/^\d[a-z0-9-]+$/.test(term)?'USN':'name';
     let query=mode==='email'?index.where('emailKey','==',term):mode==='USN'?index.where('usnKey','==',term):index.where('searchKeys','array-contains',term.slice(0,Math.min(3,term.length)));
-    query=query.orderBy('__name__').limit(50);if(cursor)query=query.startAfter(index.doc(cursor));
+    if(historicalStudents)query=query.where('__name__','in',[...historicalStudents]);if(office.scope==='department')query=query.where('department','==',office.department);query=query.orderBy('__name__').limit(50);if(cursor)query=query.startAfter(index.doc(cursor));
     docs=(await query.get()).docs;more=docs.length===50;nextCursor=more?docs.at(-1).id:null;
   }
+  const activeStudents=new Set((await Promise.all(docs.map(async doc=>{const s=(await db.doc('students/'+doc.id).get()).data();return s&&!isInactive(s)&&(office.scope!=='department'||(s.departmentId?s.departmentId===office.departmentId:department(s.department)===department(office.department)))?doc.id:null;}))).filter(Boolean));
   const matches=docs.filter(doc=>{
-    const row=doc.data();return (mode!=='name'||row.nameKey.includes(term))
+    const row=doc.data();return (!historicalStudents||historicalStudents.has(doc.id)) && activeStudents.has(doc.id) && (office.scope!=='department'||department(row.department)===department(office.department)) && (mode!=='name'||row.nameKey.includes(term))
       && (!filters.department||department(row.department)===department(filters.department))
       && (!filters.semester||String(row.semester)===String(filters.semester).trim())
       && (!filters.section||normalizeSearch(row.section)===normalizeSearch(filters.section))

@@ -43,7 +43,7 @@ export async function enrollmentPlan(db,uid) {
     items[type]={approverType:type,approverId:config[type],label:type,subjectCode:null,offeringId:null};
   }
   for(const [id,role] of [[student.mentorId,'mentor'],[config.hodId,'hod'],[config.officeId,'office']]) {
-    const person=id&&(await db.doc(`users/${id}`).get()).data();if(!person||isInactive(person)||(role==='mentor'?!isMentor(person):person.role!==role)) throw new Error(`Configure the assigned ${role}.`);
+    const person=id&&(await db.doc(`users/${id}`).get()).data();if(role==='office'&&config.officeScopeVersion===2&&person?.scope!=='department')throw new Error('Configure the department Office.');if(role==='office'&&person?.scope==='department'&&(!student.departmentId||person.departmentId!==student.departmentId))throw new Error('Configure the Office for the student department.');if(!person||isInactive(person)||(role==='mentor'?!isMentor(person):person.role!==role)) throw new Error(`Configure the assigned ${role}.`);
   }
   return {valid:true,workflowVersion:3,items,initialStates:Object.fromEntries(Object.keys(items).map(id=>[id,'pending'])),
     approverIds:[...new Set(Object.values(items).map(item=>item.approverId))],mentorId:student.mentorId,
@@ -66,7 +66,7 @@ export function migrateRequest(r,plan,projections={}) {
   const status=rejection?'rejected':remaining?'pending_stage1':laterRejected?'rejected':r.status==='pending_hod'?'pending_hod':'pending_mentor';
   return {sources,patch:{schemaVersion:2,workflowVersion:3,approvalItems:plan.items,approvalStates:states,
     resubmissionStates:Object.fromEntries(Object.entries(states).map(([id,s])=>[id,s==='rejected'?'pending':s])),
-    approverIds:plan.approverIds,remaining,status,mentorId:plan.mentorId,hodId:plan.hodId,officeId:plan.officeId,
+    approverIds:plan.approverIds,remaining,status,mentorId:plan.mentorId,hodId:plan.hodId,officeId:r.officeId||plan.officeId,
     mentorApproval:r.mentorApproval || {status:'pending',remarks:''},hodApproval:r.hodApproval || {status:'pending',remarks:''},
     lastApprovalId:rejection || '',version:r.version || 0,lastEvent:r.lastEvent || null,
     workflowHistory:{approvalItems:oldItems,approvalStates:oldStates,approvals:projections,status:r.status,remaining:r.remaining ?? null,

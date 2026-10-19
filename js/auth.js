@@ -140,7 +140,7 @@ sessionStorage.removeItem(reminderKey(profile.uid));
 window.location.href = home;
     } catch (err) {
       if (err.code === "institution/profile-missing") await signOut(auth);
-      errorEl.textContent = err.code === "institution/profile-missing" ? PROFILE_ERROR : ['unauthenticated','too-many-requests'].includes(err.code)?err.message:friendlyAuthError(err.code);
+      errorEl.textContent = err.code === "institution/profile-missing" ? PROFILE_ERROR : ['unauthenticated','too-many-requests','account/inactive','account/exited','account/not-found'].includes(err.code)?err.message:friendlyAuthError(err.code);
       errorEl.classList.remove("hidden");
       submitBtn.disabled = false;
       submitBtn.textContent = "Log in";

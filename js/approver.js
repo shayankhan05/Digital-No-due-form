@@ -102,7 +102,7 @@ function startApprovalListener(approver) {
         return Object.entries(r.approvalItems || {}).filter(([id, item]) => item.approverId === approver.uid && r.approvalStates[id] === "pending"
           && ["subject_faculty","library","accounts","physics_lab","chemistry_lab"].includes(item.approverType)
           && (item.approverType!=="subject_faculty" || item.teacherUid===approver.uid && taughtOfferings.has(item.offeringId)))
-          .map(([id, item]) => ({ id, ref: { path: `noDueRequests/${request.id}/approvals/${id}` }, data: () => ({ ...item, studentName: r.studentName, usn: r.usn, section: r.section }) }));
+          .map(([id, item]) => ({ id, ref: { path: `noDueRequests/${request.id}/approvals/${id}` }, data: () => ({ ...item, studentName: r.studentName, usn: r.usn, section: r.section, studentDepartmentName:r.studentDepartmentName||r.department||item.department||'' }) }));
       });
 
       // Do not destroy profile page when Firestore updates.
@@ -366,7 +366,7 @@ function showDashboard() {
         </div>
 
         <div class="label">
-          Department
+          ${currentApprover?.scope==='institution'?'Institution-wide service':'Department'}
         </div>
 
       </div>
@@ -602,7 +602,7 @@ function showProfile() {
       )}
 
 
-      ${detailRow("Department", departmentLabel(currentApprover?.department) || "Not available")}
+      ${currentApprover?.scope==='institution'?detailRow("Institution", "Acharya Institute of Technology (AIT)"):detailRow("Department", departmentLabel(currentApprover?.department) || "Not available")}
 
       ${detailRow(
         "Role",
@@ -689,7 +689,7 @@ function rowHtml(docSnap) {
 
         <div class="row-sub">
 
-          ${escapeHtml(data.usn || "")}
+          ${escapeHtml(data.usn || "")} ${data.studentDepartmentName?" · "+escapeHtml(departmentLabel(data.studentDepartmentName)):""}
 
           ${
             data.section

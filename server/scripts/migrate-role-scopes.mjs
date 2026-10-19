@@ -1,0 +1,17 @@
+import {readFile,writeFile,mkdir} from 'node:fs/promises';
+import {EJSON} from 'bson';
+import {createHash} from 'node:crypto';
+import dns from 'node:dns';
+import {MongoClient} from 'mongodb';
+import {initializeApp,applicationDefault} from 'firebase-admin/app';
+import {getAuth} from 'firebase-admin/auth';
+import {DocumentStore} from '../src/services/document-store.js';
+import {createProvisioner} from '../src/services/provisioning.js';
+import {migrateRoleScopes} from '../src/services/role-scope-migration.js';
+if(process.env.FIREBASE_AUTH_EMULATOR_HOST||process.env.FIREBASE_PROJECT_ID!=='digital-no-due-shayan')throw Error('Explicit existing production project required.');
+const apply=process.argv.includes('--apply'),raw=await readFile(process.env.MONGODB_URI_FILE,'utf8'),uri=(raw.match(/^\s*MONGODB_URI\s*=\s*(.+)\s*$/m)?.[1]||raw).trim().replace(/^(['"])(.*)\1$/,'$2');dns.setServers(['1.1.1.1']);
+const client=new MongoClient(uri);const app=initializeApp({projectId:process.env.FIREBASE_PROJECT_ID,credential:applicationDefault()},'role-scope-migration');
+try{await client.connect();const database=client.db(),auth=getAuth(app),store=new DocumentStore(database,client),provisioner=createProvisioner({db:store,auth,demo:false}),managers=await database.collection('users').find({role:'super_admin',accountStatus:{$nin:['inactive','deleted','deactivating','deleting','exited','exiting']}}).toArray();if(managers.length!==1)throw Error('Require one uniquely identified active Super Admin operator.');const options={database,client,auth,provisioner,actor:{uid:managers[0]._id}};
+ const plan=await migrateRoleScopes(options);console.log(JSON.stringify({mode:apply?'apply':'dry-run',plan}));
+ if(apply){const names=(await database.listCollections().toArray()).map(c=>c.name).filter(n=>!n.startsWith('system.')),snapshot=Object.fromEntries(await Promise.all(names.map(async n=>[n,await database.collection(n).find({}).sort({_id:1}).toArray()]))),digest=v=>createHash('sha256').update(EJSON.stringify(v,{relaxed:false})).digest('hex');await mkdir('migration-output',{recursive:true});const path='migration-output/account-role-scope-backup-'+new Date().toISOString().replace(/[:.]/g,'-')+'.ejson';await writeFile(path,EJSON.stringify(snapshot,{relaxed:false}),{flag:'wx',mode:0o600});console.log(JSON.stringify({backup:path,sha256:digest(snapshot),counts:Object.fromEntries(names.map(n=>[n,snapshot[n].length]))}));const result=await migrateRoleScopes({...options,apply:true});const permitted=new Set(['users','departmentWorkflows','superAdminAudit','accountExitEvents','uniqueIdentities','provisioningJobs']);for(const n of names)if(!permitted.has(n)&&digest(await database.collection(n).find({}).sort({_id:1}).toArray())!==digest(snapshot[n]))throw Error('Protected collection changed during migration: '+n);const beforeUsers=new Map(snapshot.users.map(u=>[u._id,u])),officeIds=new Set(result.offices.map(o=>o.uid));for(const u of await database.collection('users').find({}).toArray())if(u._id!==result.accounts.uid&&!officeIds.has(u._id)&&digest(u)!==digest(beforeUsers.get(u._id)))throw Error('Unrelated identity changed.');console.log(JSON.stringify({result,protectedCollectionsUnchanged:true,after:await migrateRoleScopes(options)}));}
+}catch(error){console.error(JSON.stringify({error:error.code||'MIGRATION_STOPPED',message:error.message?.includes('mongodb')?'Database connection/migration failed; secrets omitted.':error.message}));process.exitCode=1;}finally{await client.close();await app.delete();}

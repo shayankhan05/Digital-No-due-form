@@ -22,7 +22,7 @@
       "service-account-key.json",
       "**/*service-account*.json",
       "**/*.pem",
-      "**/!(student-import|teacher-import|offering-import|ise-5c-2022-confirmed|college-student-import|faculty-import|subject-import|faculty-assignment-import|teaching-import).csv",
+      "**/!(student-import|teacher-import|offering-import|ise-5c-2022-confirmed|college-student-import|faculty-import|subject-import|faculty-assignment-import|teaching-import|student-exit|faculty-exit).csv",
       "docs/**",
       "tests/**",
       "tools/**",
