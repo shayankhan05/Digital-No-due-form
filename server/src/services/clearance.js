@@ -20,7 +20,13 @@ export function subjectItem(uid,student,offering,teacher) {
     department:student.department || offering.department || '',scheme:text(student.scheme || offering.scheme),
     semester:Number(student.semester),section:text(student.section).toUpperCase()};
 }
-export async function workflowFor(db,student){if(student?.departmentId){const specific=(await db.doc('departmentWorkflows/'+student.departmentId).get()).data();if(specific)return specific;const master=(await db.doc('departments/'+student.departmentId).get()).data();if(master&&master.code!=='ISE')return null;}return (await db.doc('settings/workflow').get()).data();}
+export async function workflowFor(db,student){
+ if(student?.departmentId){const specific=(await db.doc('departmentWorkflows/'+student.departmentId).get()).data();if(specific)return specific;}
+ // Once department masters exist, never guess a department or fall back to the
+ // historical shared Office. Unconfigured identities require explicit setup.
+ if(!(await db.collection('departments').limit(1).get()).empty)return null;
+ return (await db.doc('settings/workflow').get()).data();
+}
 export async function enrollmentPlan(db,uid) {
   const student=(await db.doc(`students/${uid}`).get()).data(),config=await workflowFor(db,student);
   if(!student || !config) throw new Error('Student profile and workflow assignments are required.');
