@@ -1,3 +1,4 @@
+import {optionalSemester} from '../../../js/semester.js';
 import {departmentCode} from '../../../js/department.js';
 import {isInactive} from './account-removal.js';
 // Derived search documents only; no student, marks or workflow writes.
@@ -31,7 +32,7 @@ export async function searchOfficeStudents(db,uid,input={}){
   if(!uid)fail('unauthenticated','Sign in first.');
   if((await db.doc(`users/${uid}`).get()).data()?.role!=='office')fail('permission-denied','Only Office may search students.');
   const term=normalizeSearch(input.term);if(!term||term.length>200)fail('invalid-argument','Enter a name, USN, student ID or college email (up to 200 characters).');
-  const filters=input.filters||{};for(const key of ['department','semester','section','usn','email'])if(String(filters[key]??'').length>200)fail('invalid-argument','Filter is too long.');
+  const filters=input.filters||{};optionalSemester(filters.semester);for(const key of ['department','semester','section','usn','email'])if(String(filters[key]??'').length>200)fail('invalid-argument','Filter is too long.');
   const cursor=input.cursor||null;if(cursor&&!/^[A-Za-z0-9_-]{1,128}$/.test(cursor))fail('invalid-argument','Invalid search cursor.');
   const index=db.collection('officeStudentSearch');let docs=[],more=false,nextCursor=null,mode='name';
   const direct=/^[A-Za-z0-9_-]{1,128}$/.test(String(input.term).trim())&&!cursor?await index.doc(String(input.term).trim()).get():null;

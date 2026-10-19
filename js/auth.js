@@ -1,4 +1,4 @@
-import {hasRole,isMentor} from './capabilities.js';
+import {hasRole,isMentor,isFaculty} from './capabilities.js';
 import {mountDepartmentContext} from './department-management.js';
 import { auth, db } from "./firebase-config.js";
 import {
@@ -66,7 +66,7 @@ export function requireAuth(roles = null,{allowPasswordChange=false}={}) {
       if(initial&&(initial.uid!==profile.uid||initial.role!==profile.role)){redirect(profile);return;}
       if(settled)return;
       initial={uid:profile.uid,role:profile.role};settled=true;
-      await mountDepartmentContext(profile).catch(()=>{});if(redirecting||auth.currentUser?.uid!==profile.uid)return;if(isMentor(profile)&&profile.role==='subject_faculty'&&!document.getElementById('mentorCapabilityLink')){const a=document.createElement('a');a.id='mentorCapabilityLink';a.className='btn-sm';a.href='mentor-dashboard.html';a.textContent='My mentees';document.getElementById('logoutBtn')?.parentNode.append(a);}resolve(profile);
+      await mountDepartmentContext(profile).catch(()=>{});if(redirecting||auth.currentUser?.uid!==profile.uid)return;if(isMentor(profile)&&!document.getElementById('mentorCapabilityLink')){const a=document.createElement('a');a.id='mentorCapabilityLink';a.className='btn-sm';a.href='mentor-dashboard.html';a.textContent='My mentees';document.getElementById('logoutBtn')?.parentNode.append(a);}if(isFaculty(profile)&&!document.getElementById('subjectCapabilityLink')){const a=document.createElement('a');a.id='subjectCapabilityLink';a.className='btn-sm';a.href='approver-dashboard.html#requests';a.textContent='Subject clearances';document.getElementById('logoutBtn')?.parentNode.append(a);}if(profile.role==='hod'&&!document.getElementById('hodCapabilityLink')){const a=document.createElement('a');a.id='hodCapabilityLink';a.className='btn-sm';a.href='hod-dashboard.html#requests';a.textContent='HOD final approvals';document.getElementById('logoutBtn')?.parentNode.append(a);}resolve(profile);
       if (!allowPasswordChange) showPasswordReminder(profile);
       } catch (error) {
         if(run!==generation||intentionalSignOut||passwordChangeInProgress)return;

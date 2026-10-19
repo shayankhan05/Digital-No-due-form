@@ -1,3 +1,4 @@
+import {assertSemester} from './semester.js';
 import {departmentCode} from './department.js';
 import { db } from "./firebase-config.js";
 import { doc, writeBatch, setDoc, serverTimestamp, arrayRemove } from "./api-store.js";
@@ -21,7 +22,7 @@ export async function saveAccount(data) {
   if (data.scheme !== undefined) profile.scheme = data.scheme;
   batch.set(doc(db, "users", uid), profile, { merge: true });
   if (data.role === "student") {
-    if (!data.usn || !data.section || !Number.isInteger(Number(data.semester)) || Number(data.semester) < 1 || Number(data.semester) > 12) throw new Error("Student USN, semester (1–12), section and mentor are required.");
+    assertSemester(data.semester);if (!data.usn || !data.section) throw new Error("Student USN, section and mentor are required.");
     await requireRole(data.mentorId, ["mentor"]);
     batch.set(doc(db, "students", uid), { uid, ...profile, usn: data.usn, semester: Number(data.semester), section: data.section, mentorId: data.mentorId, updatedAt: serverTimestamp() }, { merge: true });
     batch.set(doc(db, "students", uid, "clearance", "plan"), { valid: false }, { merge: true });
@@ -35,7 +36,7 @@ export async function saveOffering(data) {
   await requireRole(data.teacherId, ["subject_faculty", "mentor"]);
   const components = data.components;
   if (!components.length || components.length > 10 || new Set(components.map(c => c.id)).size !== components.length || components.some(c => !/^[A-Za-z0-9_-]+$/.test(c.id) || !c.label || !Number.isFinite(c.max) || c.max <= 0)) throw new Error("Provide 1–10 unique assessment IDs, labels and positive maximum marks.");
-  if (!Number.isInteger(Number(data.semester)) || !data.section) throw new Error("Semester and section are required.");
+  assertSemester(data.semester);if (!data.section) throw new Error("Semester and section are required.");
   // Invalidate only students enrolled in this class before changing a trusted mapping.
   const previous = await record("offerings", data.id);
   if (previous) {

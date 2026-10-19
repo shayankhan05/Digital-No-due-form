@@ -287,7 +287,7 @@ function renderDashboard(students) {
         </div>
         <div class="office-search-filters">
           <label>Department<input id="officeDepartment" placeholder="Any department" maxlength="200" /></label>
-          <label>Semester<select id="officeSemester"><option value="">Any semester</option>${Array.from({length:12},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
+          <label>Semester<select id="officeSemester"><option value="">Any semester</option>${Array.from({length:8},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
           <label>Section<input id="officeSection" placeholder="Any section" maxlength="10" /></label>
           <label>Narrow by USN<input id="officeUsnFilter" placeholder="Any USN" maxlength="200" /></label>
           <label>Narrow by email<input id="officeEmailFilter" placeholder="Any email" maxlength="200" /></label>

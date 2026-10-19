@@ -1,3 +1,4 @@
+import {assertSemester} from '../../../js/semester.js';
 import {isMentor,isFaculty,hasRole} from '../../../js/capabilities.js';
 import {sectionMaster,studentSectionCodes} from './section-master.js';
 import {departmentCode} from '../../../js/department.js';
@@ -6,9 +7,8 @@ import {isInactive} from './account-removal.js';
 import {createHash,randomBytes} from 'node:crypto';
 import {FieldValue,HttpsError} from './values.js';
 
-import {matchesStudent,subjectItem,workflowFor} from './clearance.js';
+import {matchesStudent,subjectItem,workflowFor,requiredServices} from './clearance.js';
 const roles=['super_admin','admin','student','subject_faculty','mentor','hod','office','library','physics_lab','chemistry_lab','accounts'];
-const services=['library','accounts'];
 const text=v=>String(v??'').trim();
 const hash=v=>createHash('sha256').update(v).digest('hex');
 const stamp=()=>FieldValue.serverTimestamp();
@@ -65,9 +65,8 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     if(!(temporaryAccount(row,p) && domain==='demo.test') && (!p.allowedDomains.includes(domain) || domain==='demo.test')) fail('Email domain is not allowed by institution policy.');
     if(row.scope==='department'&&!p.departments.includes(row.department)) fail('Choose a configured department.');
     if(row.role==='student') {
-      row.usn=text(row.usn).toUpperCase();row.semester=Number(row.semester);row.section=text(row.section).toUpperCase();
+      row.usn=text(row.usn).toUpperCase();row.semester=assertSemester(row.semester);row.section=text(row.section).toUpperCase();
       if(!/^[A-Z0-9-]{4,30}$/.test(row.usn)) fail('A valid USN is required.');
-      if(!Number.isInteger(row.semester) || row.semester<1 || row.semester>12) fail('Semester must be an integer from 1 to 12.');
       if(!studentSectionCodes(p,p.departmentRecords.find(d=>d.code===row.department)).includes(row.section)) fail('Choose a configured section.');
       if(!row.scheme) fail('Scheme is required.');if(p.schemeRecords.length&&!p.schemeRecords.some(s=>s.code===row.scheme&&s.status==='active'&&(s.scope==='institution'||s.departmentIds?.includes(p.departmentRecords.find(d=>d.code===row.department)?.id))&&(!p.departmentRecords.find(d=>d.code===row.department)?.schemeIds?.length||p.departmentRecords.find(d=>d.code===row.department).schemeIds.includes(s.id))))fail('Choose an active scheme applicable to this department.');
     } else if(!row.facultyId || !/^[A-Z0-9_-]{1,80}$/.test(row.facultyId)) fail('Faculty/employee ID must contain letters, numbers, hyphens or underscores.');
@@ -256,6 +255,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   async function planFor(student,offerings) {
     const config=await workflowFor(db,student);
     if(!config) fail('Configure workflow assignments before enrolling students.');
+    const services=requiredServices(config);
     const items={};
     for(const type of services) items[type]={approverType:type,approverId:config[type],label:type.replaceAll('_',' '),subjectCode:null,offeringId:null};
     const requirements=[...services.map(role=>[config[role],role]),[student.mentorId,'mentor'],[config.hodId,'hod'],[config.officeId,'office'],...offerings.map(o=>[o.teacherId,'teaching'])];
@@ -454,8 +454,8 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   }
   async function validateOffering(input) {
     const p=await policy(),row={...input};
-    row.department=canonicalDepartment(row.department,p.departmentAliases);row.scheme=text(row.scheme);row.semester=Number(row.semester);row.section=text(row.section).toUpperCase();row.subjectCode=text(row.subjectCode);row.subjectName=text(row.subjectName);row.teacherEmail=email(row.teacherEmail);
-    if(!p.departments.includes(row.department) || !p.sections.includes(row.section) || !row.scheme || !Number.isInteger(row.semester) || row.semester<1 || row.semester>12) fail('Valid department, scheme, semester and section are required.');
+    row.department=canonicalDepartment(row.department,p.departmentAliases);row.scheme=text(row.scheme);row.semester=assertSemester(row.semester);row.section=text(row.section).toUpperCase();row.subjectCode=text(row.subjectCode);row.subjectName=text(row.subjectName);row.teacherEmail=email(row.teacherEmail);
+    if(!p.departments.includes(row.department) || !p.sections.includes(row.section) || !row.scheme) fail('Valid department, scheme, semester and section are required.');
     if(p.schemeRecords.length&&!p.schemeRecords.some(s=>s.code===row.scheme&&s.status==='active'&&(s.scope==='institution'||s.departmentIds?.includes(p.departmentRecords.find(d=>d.code===row.department)?.id))&&(!p.departmentRecords.find(d=>d.code===row.department)?.schemeIds?.length||p.departmentRecords.find(d=>d.code===row.department).schemeIds.includes(s.id))))fail('Choose an active scheme applicable to this department.');
     if(!row.subjectCode || !row.subjectName || row.subjectCode.length>40 || row.subjectName.length>200) fail('Confirmed subject code and name are required; do not guess source fields.');
     const teacher=await resolve('email',row.teacherEmail,['subject_faculty','mentor']);
@@ -503,6 +503,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     return {id:row.id,subjectCode:row.subjectCode,active:row.active,accountCreated:false,offeringCreated:!offering.exists,nextCursor:null,studentsMatched,studentsMapped,mappingErrors};
   }
   async function mapClass({department,scheme,semester,section,cursor}) {
+    assertSemester(semester);
     const p=await policy(),d=canonicalDepartment(department,p.departmentAliases),s=text(section).toUpperCase();
     if(!p.departments.includes(d) || !p.sections.includes(s) || !Number.isInteger(Number(semester)) || !text(scheme)) fail('Valid class filters required.');
     // Coarse indexed cohort query, then normalize historical class field types.

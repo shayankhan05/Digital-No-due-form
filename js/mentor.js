@@ -326,6 +326,7 @@ function showDashboard() {
 ========================================================= */
 
 function requestCardHtml(request) {
+  const clearances=Object.entries(request.approvalItems||{}).map(([key,item])=>`<li>${escapeHtml(item.subjectCode ? item.subjectCode+' — '+item.label : item.label)}: ${escapeHtml(request.approvalStates?.[key]||'pending')}</li>`).join('');
 
   return `
 
@@ -360,6 +361,7 @@ function requestCardHtml(request) {
       </div>
 
 
+      <section aria-label="Stage 1 clearances"><h4>Mentor Approval</h4><p>All subject/service clearances completed.</p><ul>${clearances}</ul></section>
       <div class="reject-fields hidden"
            style="margin-top:15px;">
 

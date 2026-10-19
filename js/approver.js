@@ -100,7 +100,7 @@ function startApprovalListener(approver) {
         const r = request.data();
         if (r.status === "rejected" && !Object.values(r.approvalStates || {}).includes("rejected")) return [];
         return Object.entries(r.approvalItems || {}).filter(([id, item]) => item.approverId === approver.uid && r.approvalStates[id] === "pending"
-          && ["subject_faculty","library","accounts"].includes(item.approverType)
+          && ["subject_faculty","library","accounts","physics_lab","chemistry_lab"].includes(item.approverType)
           && (item.approverType!=="subject_faculty" || item.teacherUid===approver.uid && taughtOfferings.has(item.offeringId)))
           .map(([id, item]) => ({ id, ref: { path: `noDueRequests/${request.id}/approvals/${id}` }, data: () => ({ ...item, studentName: r.studentName, usn: r.usn, section: r.section }) }));
       });
@@ -702,7 +702,7 @@ function rowHtml(docSnap) {
 
 
         <div class="row-sub">
-          ${escapeHtml(data.label || "")}
+          ${escapeHtml(data.approverType==='subject_faculty' ? 'Subject Faculty Approval — '+(data.subjectCode||'')+' '+(data.label||'') : data.label || "")}
         </div>
 
       </div>

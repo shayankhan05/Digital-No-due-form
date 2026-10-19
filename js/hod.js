@@ -526,7 +526,7 @@ function rowHtml(docSnap) {
 
       <span class="badge badge-approved">
 
-        Stage 1 + mentor cleared
+        HOD Final Approval · Stage 1 + mentor cleared
 
       </span>
 

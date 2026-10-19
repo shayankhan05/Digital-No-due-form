@@ -4,6 +4,7 @@ import {isInactive} from './account-removal.js';
 import {FieldValue} from './values.js';
 
 export const REQUIRED_SERVICES=['library','accounts'];
+export const requiredServices=config=>[...REQUIRED_SERVICES,...['physics_lab','chemistry_lab'].filter(type=>config?.[type])];
 const text=v=>String(v ?? '').trim();
 const department=v=>departmentCode(v).toLowerCase();
 export function matchesStudent(student,offering) {
@@ -36,9 +37,9 @@ export async function enrollmentPlan(db,uid) {
   }
   const count=Object.keys(items).length;
   if(!count || count>30) throw new Error('Assign 1–30 active subjects matching the student academic context.');
-  for(const type of REQUIRED_SERVICES) {
+  for(const type of requiredServices(config)) {
     const user=config[type] && (await db.doc(`users/${config[type]}`).get()).data();
-    if(user?.role!==type) throw new Error(`Configure the ${type} approver.`);
+    if(user?.role!==type||isInactive(user)) throw new Error(`Configure the ${type} approver.`);
     items[type]={approverType:type,approverId:config[type],label:type,subjectCode:null,offeringId:null};
   }
   for(const [id,role] of [[student.mentorId,'mentor'],[config.hodId,'hod'],[config.officeId,'office']]) {
