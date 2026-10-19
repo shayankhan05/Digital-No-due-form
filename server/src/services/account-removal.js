@@ -1,5 +1,5 @@
 import {isMentor} from '../../../js/capabilities.js';
-import {authorizeAccountTarget} from './department-master.js';
+import {authorizeAccountTarget,departmentOf} from './department-master.js';
 import {isManager} from './roles.js';
 import {randomUUID} from 'node:crypto';
 import {DocumentStore} from './document-store.js';
@@ -32,9 +32,15 @@ export async function accountExit({database,client,auth,actor,input={},restoreSt
  if(action==='lookup'){
   const value=String(input.value||'').trim();if(!value||value.length>200)fail('Enter a USN, employee ID or college email.');
   const query={role:{$in:roles},[value.includes('@')?'email':input.kind==='student'?'usn':'facultyId']:value};
-  let profiles;if(input.kind==='student'&&!value.includes('@')){const students=await database.collection('students').find({usn:value}).collation({locale:'en',strength:2}).limit(2).toArray();profiles=await database.collection('users').find({_id:{$in:students.map(s=>s._id)},role:'student'}).toArray();}
-  else profiles=await database.collection('users').find(query).collation({locale:'en',strength:2}).limit(2).toArray();
-  if(actor.managementDepartmentId)profiles=profiles.filter(p=>p.departmentId===actor.managementDepartmentId);if(profiles.length>1)fail('Identity is ambiguous; resolve duplicate records before exit management.','failed-precondition');
+  let profiles;if(input.kind==='student'&&!value.includes('@')){const students=await database.collection('students').find({usn:value}).collation({locale:'en',strength:2}).toArray();profiles=await database.collection('users').find({_id:{$in:students.map(s=>s._id)},role:'student'}).toArray();}
+  else profiles=await database.collection('users').find(query).collation({locale:'en',strength:2}).toArray();
+  // Resolve ownership exactly as lifecycle authorization does, before checking
+  // ambiguity. Legacy department codes/names are valid without rewriting users.
+  if(actor.managementDepartmentId){
+   const scoped=await Promise.all(profiles.map(async profile=>({profile,departmentId:await departmentOf(database,'users',profile)})));
+   profiles=scoped.filter(({profile,departmentId})=>departmentId===actor.managementDepartmentId||administrator.role==='super_admin'&&profile.scope==='institution').map(({profile})=>profile);
+  }
+  if(profiles.length>1)fail('Identity is ambiguous; resolve duplicate records before exit management.','failed-precondition');
   return {account:profiles.length?await accountRemoval({database,client,auth,actor,uid:profiles[0]._id,preview:true}):null};
  }
  if(['directory','export'].includes(action)){

@@ -70,3 +70,49 @@ test('real department Office dashboard queries and Chrome screen load without re
 test('unconfigured legacy students and fresh departments never fall back to historical shared Office routing',async()=>{
  const {workflowFor}=await import('../src/services/clearance.js');await store.doc('settings/workflow').set({officeId:ids['ME-office'],accounts:ids['central-accounts'],library:ids['central-library']},{merge:true});const before=await database.collection('institutionPolicy').findOne({_id:'workflow'});assert.equal(await workflowFor(store,{department:'',departmentId:undefined}),null);assert.equal(await workflowFor(store,{department:'ME',departmentId:'missing-department'}),null);assert.equal(await workflowFor(store,{department:'FUTURE',departmentId:'dep_FUTURE'}),null);assert.equal((await workflowFor(store,{department:'CSE',departmentId:'dep_CSE'})).officeId,ids['CSE-office']);assert.deepEqual(await database.collection('institutionPolicy').findOne({_id:'workflow'}),before);
 });
+
+test('manual exit lookup resolves legacy department ownership before ambiguity and preserves service scope',async()=>{
+ const adminId=await person('exit-search-admin','admin',{scope:'department',departmentId:'dep_ME',department:'ME'}),me={uid:adminId,role:'admin',managementDepartmentId:'dep_ME'},root=actor();
+ const student=await person('exit-search-student','student',{department:'ME',name:'Ayesha Nair'}),faculty=await person('exit-search-faculty','subject_faculty',{department:'Mechanical Engineering',facultyId:'ME-FAC-001',name:'Dr. Arjun Rao'});
+ // These are temporary audit fixtures, never production identities.
+ await database.collection('departments').updateOne({_id:'dep_ME'},{$set:{name:'Mechanical Engineering',nameKey:'mechanical engineering'}});
+ await database.collection('students').insertOne({_id:student,usn:'ME-STU-006',department:'ME',semester:5,section:'B',scheme:'2022'});
+ const lookup=(who,kind,value)=>accountExit({database,client,auth,actor:who,input:{action:'lookup',kind,value}});
+ const profile=await database.collection('users').findOne({_id:student}),teacher=await database.collection('users').findOne({_id:faculty});
+ const before=await database.collection('users').find({}).sort({_id:1}).toArray();
+ for(const [kind,value,id]of [['student',' me-stu-006 ',student],['student',profile.email.toUpperCase(),student],['faculty',' me-fac-001 ',faculty],['faculty',teacher.email.toUpperCase(),faculty]])assert.equal((await lookup(me,kind,value)).account.uid,id);
+ assert.equal((await lookup(me,'faculty','ISE-subject_faculty')).account,null);
+ assert.equal((await lookup(me,'student','AUDITISE')).account,null);
+ assert.equal((await lookup(me,'student','UNKNOWN-STUDENT')).account,null);
+ assert.equal((await lookup(root,'student','AUDITCSE')).account.uid,ids['CSE-student']);
+ const common=await database.collection('users').findOne({_id:ids['central-accounts']});assert.equal((await lookup({...root,managementDepartmentId:'dep_ME'},'faculty',common.email)).account.uid,common._id);
+ assert.equal((await lookup(me,'faculty',common.email)).account,null);
+ assert.deepEqual(await database.collection('users').find({}).sort({_id:1}).toArray(),before);
+ // A same-USN row in a different department cannot hide the authorized result.
+ const alien1=await person('exit-search-alien1','student',{departmentId:'dep_ISE',department:'ISE'}),alien2=await person('exit-search-alien2','student',{departmentId:'dep_CSE',department:'CSE'});
+ await database.collection('students').insertMany([{_id:alien1,usn:'SCOPED-USN'},{_id:alien2,usn:'SCOPED-USN'},{_id:await person('exit-search-last','student',{department:'ME'}),usn:'SCOPED-USN'}]);
+ assert.equal((await lookup(me,'student','SCOPED-USN')).account.department,'ME');
+ await assert.rejects(()=>lookup(root,'student','SCOPED-USN'),/ambiguous/);
+});
+
+test('Chrome manual exit search finds ID/email, hides foreign identities and exits loading on no-match/error/timeout without lifecycle writes',async()=>{
+ const admin=await database.collection('users').findOne({_id:ids['exit-search-admin']}),student=await database.collection('users').findOne({_id:ids['exit-search-student']}),faculty=await database.collection('users').findOne({_id:ids['exit-search-faculty']});
+ const auditBrowser=await chromium.launch({headless:true,channel:'chrome'}),context=await auditBrowser.newContext();
+ try{
+ await context.route('**/js/firebase-config.js',async route=>route.fulfill({contentType:'text/javascript',body:(await readFile('../js/firebase-config.js','utf8')).replaceAll('demo-digital-no-due','demo-mongo-audit').replaceAll(':9199',':9298').replaceAll('5050','5053')}));await context.route('**/js/api-config.js',route=>route.fulfill({contentType:'text/javascript',body:"export const API_BASE_URL='http://127.0.0.1:3003';"}));
+ const page=await context.newPage();await page.goto('http://127.0.0.1:5053/login.html');await page.waitForFunction(()=>typeof document.getElementById('resetForm')?.onsubmit==='function');await page.locator('#email').fill(admin.email);await page.locator('#password').fill('DemoPassword123!');await page.getByRole('button',{name:'Log in',exact:true}).click();await page.waitForURL(/admin-dashboard/);await page.locator('#studentExitQuery').waitFor();
+ assert.equal(await page.locator('#studentExitResult').innerText(),'');assert.equal(await page.locator('#facultyExitResult').innerText(),'');
+ const snapshot=async()=>Object.fromEntries(await Promise.all(['users','students','marks','enrollments','noDueRequests','approvals','accountExitEvents','superAdminAudit'].map(async c=>[c,await database.collection(c).find({}).sort({_id:1}).toArray()]))),before=await snapshot();
+ const search=async(kind,value)=>{await page.locator('#'+kind+'ExitQuery').fill(value);await page.locator('#'+kind+'ExitSearch').click();await page.waitForFunction(k=>document.getElementById(k+'ExitResult').getAttribute('aria-busy')==='false',kind);assert.equal(await page.locator('#'+kind+'ExitSearch').isEnabled(),true);return page.locator('#'+kind+'ExitResult').innerText();};
+ for(const value of ['ME-STU-006',student.email])assert.match(await search('student',value),/Ayesha Nair/);
+ for(const value of ['ME-FAC-001',faculty.email])assert.match(await search('faculty',value),/Dr. Arjun Rao/);
+ assert.equal(await search('student','AUDITISE'),'No matching account found.');assert.equal(await search('faculty','UNKNOWN-FACULTY'),'No matching account found.');
+ await page.route('**/api/admin/account-removal',route=>{assert.equal(route.request().postDataJSON().action,'lookup');return route.fulfill({status:503,contentType:'application/json',headers:{'Access-Control-Allow-Origin':'http://127.0.0.1:5053'},body:JSON.stringify({error:{message:'Temporary service failure'}})});});
+ assert.equal(await search('student','ME-STU-006'),'Unable to search accounts. Please retry.');await page.unroute('**/api/admin/account-removal');
+ // Shorten only the browser fixture's search timer to exercise a hung request.
+ await page.evaluate(()=>{const original=window.setTimeout;window.setTimeout=(callback,ms,...args)=>original(callback,ms===25000?100:ms,...args);});
+ await page.route('**/api/admin/account-removal',async route=>{await new Promise(resolve=>setTimeout(resolve,500));await route.abort().catch(()=>{});});
+ assert.equal(await search('faculty','ME-FAC-001'),'Unable to search accounts. Please retry.');
+ assert.deepEqual(await snapshot(),before);
+ }finally{await context.close();await auditBrowser.close();}
+});

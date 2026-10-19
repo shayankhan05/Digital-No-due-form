@@ -1,6 +1,6 @@
 import {roleLabel,accountLabel} from './display-labels.js';
 import {departmentLabel} from './department.js';
-import {post} from './api.js';
+import {post,apiFetch} from './api.js';
 import {escapeHtml as e} from './ui.js';
 const endpoint='/api/admin/account-removal';
 const inactive=account=>['inactive','deleted','exited','exiting','deactivating','deleting'].includes(account.accountStatus);
@@ -46,7 +46,23 @@ export function mountExitManagement(host,actor={}){
  let cursor=null,rows=[],version=0;
  const q=id=>host.querySelector('#'+id);
  const refresh=async()=>{if(q('exitDirectory').closest('details')?.open)await loadDirectory();for(const kind of ['student','faculty'])if(q(kind+'ExitQuery').value.trim())await lookup(kind);};
- async function lookup(kind){const target=q(kind+'ExitResult'),button=q(kind+'ExitSearch');button.disabled=true;try{const {account}=await post(endpoint,{action:'lookup',kind,value:q(kind+'ExitQuery').value});target.innerHTML=account?`${exitIdentityHTML(account)}<div class="provision-actions"><button class="btn-primary" data-remove-account="${e(account.uid)}">${exited(account)?'View exited account':inactive(account)?'View inactive account':'Deactivate '+(kind==='student'?'Student':'Faculty')}</button>${inactive(account)&&!exited(account)?`<button class="btn-sm" data-reactivate-account="${e(account.uid)}" data-kind="${kind}">Reactivate existing account</button>`:''}</div>`:'<p>No matching account found.</p>';if(account&&exited(account)&&actor.role==='super_admin'){const restore=document.createElement('button');restore.type='button';restore.className='btn-sm';restore.textContent='Restore exited account';restore.onclick=()=>restoreExited(account,kind,refresh);target.querySelector('.provision-actions').append(restore);}if(account&&!exited(account)){const b=document.createElement('button');b.type='button';b.className='btn-sm';b.textContent='Permanent Institutional Exit';b.onclick=()=>exitInstitution(account,kind,refresh);target.querySelector('.provision-actions').append(b);}wireAccountRemoval(target,refresh);wireAccountReactivation(target,refresh);}catch(error){target.textContent=error.message;}finally{button.disabled=false;}}
+ const searches={};
+ async function lookup(kind){
+  const target=q(kind+'ExitResult'),button=q(kind+'ExitSearch'),value=q(kind+'ExitQuery').value.trim();
+  searches[kind]?.abort();const controller=new AbortController();searches[kind]=controller;
+  if(!value){target.replaceChildren();button.disabled=false;target.setAttribute('aria-busy','false');return;}
+  button.disabled=true;target.setAttribute('aria-busy','true');target.innerHTML='<p role="status">Searching accounts…</p>';
+  const timer=setTimeout(()=>controller.abort(),25000);
+  try{
+   const {account}=await Promise.race([
+    apiFetch(endpoint,{method:'POST',body:JSON.stringify({action:'lookup',kind,value}),signal:controller.signal}),
+    new Promise((_,reject)=>controller.signal.addEventListener('abort',()=>reject(new Error('Account search cancelled or timed out.')),{once:true}))
+   ]);
+   if(searches[kind]!==controller)return;
+   target.innerHTML=account?`${exitIdentityHTML(account)}<div class="provision-actions"><button class="btn-primary" data-remove-account="${e(account.uid)}">${exited(account)?'View exited account':inactive(account)?'View inactive account':'Deactivate '+(kind==='student'?'Student':'Faculty')}</button>${inactive(account)&&!exited(account)?`<button class="btn-sm" data-reactivate-account="${e(account.uid)}" data-kind="${kind}">Reactivate existing account</button>`:''}</div>`:'<p>No matching account found.</p>';if(account&&exited(account)&&actor.role==='super_admin'){const restore=document.createElement('button');restore.type='button';restore.className='btn-sm';restore.textContent='Restore exited account';restore.onclick=()=>restoreExited(account,kind,refresh);target.querySelector('.provision-actions').append(restore);}if(account&&!exited(account)){const b=document.createElement('button');b.type='button';b.className='btn-sm';b.textContent='Permanent Institutional Exit';b.onclick=()=>exitInstitution(account,kind,refresh);target.querySelector('.provision-actions').append(b);}wireAccountRemoval(target,refresh);wireAccountReactivation(target,refresh);
+  }catch{if(searches[kind]===controller)target.innerHTML='<p role="alert">Unable to search accounts. Please retry.</p>';}
+  finally{clearTimeout(timer);if(searches[kind]===controller){button.disabled=false;target.setAttribute('aria-busy','false');}}
+ }
  async function loadDirectory(append=false){const run=++version;if(q('exitDirectoryStatus').value==='none'){rows=[];cursor=null;q('exitDirectory').replaceChildren();q('exitDirectoryMore').hidden=true;return;}q('exitDirectoryMore').disabled=true;try{const result=await post(endpoint,{action:'directory',kind:q('exitDirectoryKind').value,status:q('exitDirectoryStatus').value,cursor:append?cursor:null});if(run!==version)return;rows=append?[...rows,...result.rows]:result.rows;cursor=result.cursor;q('exitDirectory').innerHTML=`<div class="table-scroll"><table><thead><tr><th>Name</th><th>USN / Employee ID</th><th>Department</th><th>Semester / Section or Role / Subjects</th><th>Status</th><th>Actions</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${e(r.name)}</td><td>${e(r.identifier)}</td><td>${e(departmentLabel(r.department))}</td><td>${r.role==='student'?`Semester ${e(r.semester)} · Section ${e(r.section)}`:`${e(roleLabel(r.role))}<br>${e(r.subjects)}`}</td><td>${e(r.accountStatus)}</td><td><button class="btn-sm" data-remove-account="${e(r.uid)}">View details</button>${inactive(r)?`<button class="btn-sm" data-reactivate-account="${e(r.uid)}" data-kind="${r.role==='student'?'student':'faculty'}">Reactivate existing account</button>`:''}</td></tr>`).join('')}</tbody></table></div>${!rows.length?'<p>No accounts match this filter.</p>':''}`;q('exitDirectoryMore').hidden=!result.more;wireAccountRemoval(q('exitDirectory'),refresh);wireAccountReactivation(q('exitDirectory'),refresh);}catch(error){q('exitDirectoryMessage').textContent=error.message;}finally{q('exitDirectoryMore').disabled=false;}}
  for(const kind of ['student','faculty'])q(kind+'ExitForm').onsubmit=event=>{event.preventDefault();lookup(kind);};
  for(const id of ['exitDirectoryKind','exitDirectoryStatus'])q(id).onchange=()=>loadDirectory();q('exitDirectoryMore').onclick=()=>loadDirectory(true);
