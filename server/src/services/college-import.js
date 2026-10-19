@@ -1,3 +1,4 @@
+import {studentSectionCodes} from './section-master.js';
 import {integritySnapshot,auditIntegrity} from './integrity-audit.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {runImportRows} from './import-workers.js';
@@ -32,7 +33,7 @@ async function assignmentRow(database,raw){
 async function teachingRow(database,raw){
  const subject=await subjectRow(database,raw),employeeId=String(raw.employeeId||'').trim().toUpperCase(),teachers=await database.collection('users').find({facultyId:employeeId}).collation({locale:'en',strength:2}).toArray();
  if(!employeeId||teachers.length!==1||!isFaculty(teachers[0])||isInactive(teachers[0])||departmentCode(teachers[0].department)!==subject.department||teachers[0].departmentId&&teachers[0].departmentId!==subject.departmentId)fail('Missing, inactive or wrong-department faculty employee ID: '+employeeId);
- const dep=await database.collection('departments').findOne({_id:subject.departmentId}),section=String(raw.section||'').trim().toUpperCase();if(!section||dep.sections&&!dep.sections.includes(section))fail('Choose a configured department section.');
+ const dep=await database.collection('departments').findOne({_id:subject.departmentId}),policy=await database.collection('institutionPolicy').findOne({_id:'institution'})||{},section=String(raw.section||'').trim().toUpperCase();if(!studentSectionCodes(policy,dep).includes(section))fail('Choose a configured department section.');
  const existing=await database.collection('subjects').findOne({_id:subject.id});if(existing&&subject.credits!==null&&existing.credits!==undefined&&existing.credits!==null&&Number(existing.credits)!==subject.credits)fail('Subject credits differ from the existing master. Edit them explicitly.');
  const row={...subject,employeeId,section,teacherEmail:teachers[0].email,credits:subject.credits??existing?.credits??null,components:raw.components||defaultComponents};
  const scope=dep.creationDigest?{departmentId:subject.departmentId}:{$or:[{departmentId:subject.departmentId},{department:subject.department,departmentId:{$exists:false}}]},classes=await database.collection('offerings').find({...scope,scheme:subject.scheme,semester:{$in:[subject.semester,String(subject.semester)]},section,subjectCode:subject.subjectCode}).toArray(),canonical='class_'+hash([subject.department,subject.scheme,subject.semester,section,subject.subjectCode].join('|')).slice(0,32);
