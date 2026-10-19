@@ -59,6 +59,10 @@ export function mountExitManagement(host,actor={}){
     new Promise((_,reject)=>controller.signal.addEventListener('abort',()=>reject(new Error('Account search cancelled or timed out.')),{once:true}))
    ]);
    if(searches[kind]!==controller)return;
+   if(kind==='faculty'&&account?.canManage===false){
+    target.innerHTML=`${exitIdentityHTML(account)}<p>HOD accounts can be managed only by Super Admin.</p>`;
+    return;
+   }
    target.innerHTML=account?`${exitIdentityHTML(account)}<div class="provision-actions"><button class="btn-primary" data-remove-account="${e(account.uid)}">${exited(account)?'View exited account':inactive(account)?'View inactive account':'Deactivate '+(kind==='student'?'Student':'Faculty')}</button>${inactive(account)&&!exited(account)?`<button class="btn-sm" data-reactivate-account="${e(account.uid)}" data-kind="${kind}">Reactivate existing account</button>`:''}</div>`:'<p>No matching account found.</p>';if(account&&exited(account)&&actor.role==='super_admin'){const restore=document.createElement('button');restore.type='button';restore.className='btn-sm';restore.textContent='Restore exited account';restore.onclick=()=>restoreExited(account,kind,refresh);target.querySelector('.provision-actions').append(restore);}if(account&&!exited(account)){const b=document.createElement('button');b.type='button';b.className='btn-sm';b.textContent='Permanent Institutional Exit';b.onclick=()=>exitInstitution(account,kind,refresh);target.querySelector('.provision-actions').append(b);}wireAccountRemoval(target,refresh);wireAccountReactivation(target,refresh);
   }catch{if(searches[kind]===controller)target.innerHTML='<p role="alert">Unable to search accounts. Please retry.</p>';}
   finally{clearTimeout(timer);if(searches[kind]===controller){button.disabled=false;target.setAttribute('aria-busy','false');}}

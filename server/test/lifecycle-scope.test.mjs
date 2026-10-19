@@ -116,3 +116,32 @@ test('Chrome manual exit search finds ID/email, hides foreign identities and exi
  assert.deepEqual(await snapshot(),before);
  }finally{await context.close();await auditBrowser.close();}
 });
+
+test('faculty HOD-readonly lookup resolves employee ID and email without granting lifecycle management',async()=>{
+ const adminUid=await person('faculty-hod-admin','admin',{scope:'department',departmentId:'dep_ME',department:'ME'}),uid=await person('faculty-hod-canary','hod',{scope:'department',departmentId:'dep_ME',department:'ME',facultyId:'ME-FAC-002',name:'Dr. Sana Khan',isMentor:true}),student=await person('faculty-hod-student','student',{departmentId:'dep_ME',department:'ME',name:'Student email canary'});
+ await database.collection('students').insertOne({_id:student,usn:'FACULTY-EMAIL-STUDENT',department:'ME',departmentId:'dep_ME',semester:5,section:'B',scheme:'2022'});
+ const faculty=await database.collection('users').findOne({_id:uid}),studentProfile=await database.collection('users').findOne({_id:student}),bearer=await token('faculty-hod-admin'),call=(body,who=bearer)=>request(app).post('/api/admin/account-removal').set('Authorization','Bearer '+who).send(body);
+ const before=await database.collection('users').find({}).sort({_id:1}).toArray();
+ for(const value of ['ME-FAC-002',faculty.email,' '+faculty.email.toUpperCase()+' ']){const response=await call({action:'lookup',kind:'faculty',value});assert.equal(response.status,200,JSON.stringify(response.body));assert.equal(response.body.account.uid,uid);assert.equal(response.body.account.identifier,'ME-FAC-002');assert.equal(response.body.account.role,'hod');assert.equal(response.body.account.canManage,false);assert.equal(response.body.account.accountStatus,'active');}
+ const unknown=await call({action:'lookup',kind:'faculty',value:'unknown-faculty@demo.test'});assert.equal(unknown.status,200);assert.equal(unknown.body.account,null);
+ const foreign=await database.collection('users').findOne({_id:ids['ISE-hod']});assert.equal((await call({action:'lookup',kind:'faculty',value:foreign.email})).body.account,null);
+ const root=await call({action:'lookup',kind:'faculty',value:faculty.email},await token('manager'));assert.equal(root.status,200);assert.equal(root.body.account.uid,uid);assert.notEqual(root.body.account.canManage,false);
+ const studentResult=await call({action:'lookup',kind:'student',value:studentProfile.email});assert.equal(studentResult.status,200);assert.equal(studentResult.body.account.uid,student);
+ // Read permission must not relax any existing lifecycle permission.
+ for(const body of [{uid,preview:true},{uid,confirmation:'DEACTIVATE'},{action:'reactivate',kind:'faculty',uid,confirmation:'REACTIVATE'},{action:'institutional-exit',kind:'faculty',uid,confirmation:'EXIT',reason:'must be blocked'}])assert.equal((await call(body)).status,403);
+ assert.deepEqual(await database.collection('users').find({}).sort({_id:1}).toArray(),before);
+ assert.equal((await auth.getUser(uid)).disabled,false);assert.ok(adminUid);
+});
+
+test('Chrome faculty HOD-readonly email and employee lookup show the same card without lifecycle controls; student lookup remains unchanged',async()=>{
+ const admin=await database.collection('users').findOne({_id:ids['faculty-hod-admin']}),faculty=await database.collection('users').findOne({_id:ids['faculty-hod-canary']}),student=await database.collection('users').findOne({_id:ids['faculty-hod-student']}),foreign=await database.collection('users').findOne({_id:ids['ISE-hod']});
+ const auditBrowser=await chromium.launch({headless:true,channel:'chrome'}),context=await auditBrowser.newContext();
+ try{await context.route('**/js/firebase-config.js',async route=>route.fulfill({contentType:'text/javascript',body:(await readFile('../js/firebase-config.js','utf8')).replaceAll('demo-digital-no-due','demo-mongo-audit').replaceAll(':9199',':9298').replaceAll('5050','5053')}));await context.route('**/js/api-config.js',route=>route.fulfill({contentType:'text/javascript',body:"export const API_BASE_URL='http://127.0.0.1:3003';"}));
+ const page=await context.newPage();await page.goto('http://127.0.0.1:5053/login.html');await page.waitForFunction(()=>typeof document.getElementById('resetForm')?.onsubmit==='function');await page.locator('#email').fill(admin.email);await page.locator('#password').fill('DemoPassword123!');await page.getByRole('button',{name:'Log in',exact:true}).click();await page.waitForURL(/admin-dashboard/);await page.locator('#facultyExitQuery').waitFor();
+ const search=async(kind,value)=>{await page.locator('#'+kind+'ExitQuery').fill(value);await page.locator('#'+kind+'ExitSearch').click();await page.waitForFunction(k=>document.getElementById(k+'ExitResult').getAttribute('aria-busy')==='false',kind);assert.equal(await page.locator('#'+kind+'ExitSearch').isEnabled(),true);return page.locator('#'+kind+'ExitResult');};
+ let card=await search('faculty','ME-FAC-002');const byId=await card.innerText();assert.match(byId,/Dr. Sana Khan/);assert.match(byId,/ME-FAC-002/);assert.match(byId,/Super Admin/);assert.equal(await card.locator('button').count(),0);
+ card=await search('faculty',faculty.email);assert.equal(await card.innerText(),byId);assert.equal(await card.locator('button').count(),0);
+ assert.equal(await (await search('faculty','unknown-faculty@demo.test')).innerText(),'No matching account found.');assert.equal(await (await search('faculty',foreign.email)).innerText(),'No matching account found.');
+ const studentCard=await search('student',student.email);assert.match(await studentCard.innerText(),/Student email canary/);assert.equal(await studentCard.locator('[data-remove-account]').count(),1);
+ }finally{await context.close();await auditBrowser.close();}
+});

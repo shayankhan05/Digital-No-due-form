@@ -41,6 +41,15 @@ export async function accountExit({database,client,auth,actor,input={},restoreSt
    profiles=scoped.filter(({profile,departmentId})=>departmentId===actor.managementDepartmentId||administrator.role==='super_admin'&&profile.scope==='institution').map(({profile})=>profile);
   }
   if(profiles.length>1)fail('Identity is ambiguous; resolve duplicate records before exit management.','failed-precondition');
+  const profile=profiles[0];
+  // Faculty can retain their employee identity while serving as HOD. Lookup is
+  // read-only; Department Admin still cannot perform HOD lifecycle operations.
+  if(input.kind==='faculty'&&profile?.role==='hod'&&administrator.role==='admin'){
+   const own=await departmentOf(database,'users',{...administrator,scope:'department'});
+   if(!own||profile.scope==='institution'||await departmentOf(database,'users',profile)!==own)fail('Account belongs to another department.','permission-denied');
+   const offerings=await database.collection('offerings').find({teacherId:profile._id,active:{$ne:false}}).toArray();
+   return {account:{...await exitIdentity(database,profile._id,{profile,student:null,offerings,blockers:[]}),canManage:false}};
+  }
   return {account:profiles.length?await accountRemoval({database,client,auth,actor,uid:profiles[0]._id,preview:true}):null};
  }
  if(['directory','export'].includes(action)){
