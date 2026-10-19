@@ -314,7 +314,7 @@ async function retryAction(role,id,body){const response=await api(role,retryPath
 async function retryRecords(id){return database.collection('approvals').find({requestId:id}).sort({_id:1}).toArray();}
 
 test('Chrome: 1AY24IS140 resubmits only the rejected subject of the same teacher',async()=>{
- const teacherRow={name:'Aarav Mehta',collegeEmail:'aarav.mehta@demo.test',department:'ISE',phone:'9000000140',employeeId:'RETRY140',role:'subject_faculty'};
+ const teacherRow={name:'Aarav Mehta',collegeEmail:'retry-aarav140@demo.test',department:'ISE',phone:'9000000140',employeeId:'RETRY140',role:'subject_faculty'};
  const teacher=await admin({action:'importTeacher',row:teacherRow});accounts.retryTeacher={uid:teacher.uid,email:teacherRow.collegeEmail};await finishTemporary(teacherRow.collegeEmail);
  retrySubjects=[];
  for(const [subjectCode,subjectName]of [['BCS511','Software Quality Engineering'],['BCS501','Software Engineering & Project Management']]){
@@ -1028,4 +1028,51 @@ ME505,CAD/CAM,2022,5,B,ME-FAC-003,3,true`;
  await p.getByRole('link',{name:'Departments',exact:true}).click();await p.getByRole('button',{name:'Change HOD',exact:true}).click();assert.equal(await p.locator('#leadershipResults tbody tr').count(),0);await p.getByRole('button',{name:'Show all eligible faculty',exact:true}).click();await p.waitForFunction(()=>document.querySelectorAll('#leadershipResults tbody tr').length>=10);assert.equal(await p.locator('#leadershipForm select').count(),0);assert.ok(await p.locator('#leadershipResults tbody tr').count()>=10);await p.getByRole('button',{name:'Hide eligible faculty',exact:true}).click();await p.route('**/api/administration/leadership-candidates?**',route=>route.fulfill({status:503,json:{error:{message:'Isolated candidate request unavailable'}}}));await p.getByRole('button',{name:'Show all eligible faculty',exact:true}).click();await p.locator('#leadershipResults [role=alert]').waitFor();assert.match(await p.locator('#leadershipResults').innerText(),/Unable to load eligible faculty.*Isolated candidate request unavailable/);assert.equal(await p.getByRole('button',{name:'Show all eligible faculty',exact:true}).isVisible(),true);assert.equal(await p.locator('#leadershipForm [name=uid]').isEnabled(),true);await p.unroute('**/api/administration/leadership-candidates?**');await p.getByRole('button',{name:'Show all eligible faculty',exact:true}).click();await p.waitForFunction(()=>document.querySelectorAll('#leadershipResults tbody tr').length>=10);assert.equal(await p.locator('#leadershipForm select').count(),0);await ui.context.close();
  const repeated=await preview(csv+'\nME501,Thermodynamics,2022,5,A,ME-FAC-001,4,true');assert.equal(repeated.body.valid,9,JSON.stringify(repeated.body));assert.equal(repeated.body.rows.filter(r=>r.duplicate).length,2);assert.deepEqual(repeated.body.rows.filter(r=>r.duplicate).map(r=>r.index),[0,10]);
  for(const[c,docs]of Object.entries(before))assert.deepEqual(await database.collection(c).find({}).sort({_id:1}).toArray(),docs,'Preview modified '+c);
+});
+
+
+test('student CSV sections use active shared defaults, explicit department restrictions and catalog ownership',async()=>{
+ const {studentSectionCodes:codes}=await import('../src/services/section-master.js');
+ assert.deepEqual(codes({}, {id:'me',sections:[]}),['A','B','C']);
+ assert.deepEqual(codes({}, {id:'me',sections:[' a ',' b ']}),['A','B']);
+ assert.deepEqual(codes({sections:['A','B'],sectionRecords:[{code:'A',status:'active',departmentId:'cse'},{code:'B',status:'inactive'}]}, {id:'me',sections:[]}),[]);
+ assert.deepEqual(codes({sections:['A'],sectionRecords:[{code:'A',status:'active',departmentId:'me'}]}, {id:'me',sections:[]}),['A']);
+});
+
+test('student CSV sections validate official raw ME rows before current-department mentors without importing',async()=>{
+ const {parseCollegeCSV}=await import('../../js/college-csv.js');
+ const dep=await database.collection('departments').findOne({code:'ME'})||{_id:'student-section-me',code:'ME',name:'Mechanical Engineering',status:'active'};
+ await database.collection('departments').updateOne({_id:dep._id},{$set:{...dep,sections:[]}},{upsert:true});
+ await database.collection('schemes').updateOne({code:'2022'},{$setOnInsert:{_id:'student-section-2022',code:'2022',name:'2022 Scheme',scope:'institution',status:'active'}},{upsert:true});
+ const policy=await database.collection('institutionPolicy').findOne({_id:'institution'});
+ await database.collection('institutionPolicy').updateOne({_id:'institution'},{$unset:{sections:'',sectionRecords:''}});
+ for(const n of [1,3,5]){
+  const facultyId='ME-FAC-'+String(n).padStart(3,'0');
+  await database.collection('users').updateOne({facultyId},{$set:{department:'ME',departmentId:dep._id,scope:'department',role:'subject_faculty',isMentor:true,accountStatus:'active'},$setOnInsert:{_id:'student-section-mentor-'+n,name:'Section Fixture Mentor '+n,email:'section-fixture-mentor-'+n+'@demo.test'}},{upsert:true});
+ }
+ const csv=`usn,name,college_email,phone,scheme,semester,section,mentor_employee_id
+ME-STU-001,Aarav Mehta,aarav.mehta@demo.test,9000001001,2022,5,A,ME-FAC-001
+ME-STU-002,Ananya Rao,ananya.rao@demo.test,9000001002,2022,5,A,ME-FAC-003
+ME-STU-006,Ayesha Nair,ayesha.nair@demo.test,9000001006,2022,5,B,ME-FAC-005`;
+ const preview=async text=>{
+  const before={};for(const name of ['users','students','subjects','offerings','enrollments','marks','noDueRequests','approvals','sectionDetails','superAdminAudit'])before[name]=await database.collection(name).find({}).sort({_id:1}).toArray();
+  const response=await request(app).post('/api/college-import/preview').set('Authorization','Bearer '+await token(accounts.super_admin.email)).set('X-Department-Id',dep._id).send({type:'students',rows:parseCollegeCSV(text,'students'),requestId:crypto.randomUUID()});
+  assert.equal(response.status,200,JSON.stringify(response.body));
+  for(const[name,docs]of Object.entries(before))assert.deepEqual(await database.collection(name).find({}).sort({_id:1}).toArray(),docs,'Student preview modified '+name);
+  return response.body;
+ };
+ try{
+  const valid=await preview(csv);assert.equal(valid.valid+valid.warnings,3,JSON.stringify(valid));assert.equal(valid.errors,0);assert.deepEqual(valid.rows.map(r=>r.row.section),['A','A','B']);assert.ok(valid.rows.every(r=>r.row.department==='ME'&&r.row.departmentId===dep._id));
+  const trimmed=await preview(csv.replaceAll(',A,',', a ,').replaceAll(',B,',', b ,'));assert.equal(trimmed.errors,0,JSON.stringify(trimmed));
+  await database.collection('departments').updateOne({_id:dep._id},{$set:{sections:[' a ','b',' C ']}});assert.equal((await preview(csv)).errors,0);
+  await database.collection('departments').updateOne({_id:dep._id},{$set:{sections:['A']}});const restricted=await preview(csv);assert.equal(restricted.errors,1);assert.match(restricted.rows[2].error,/configured section/);
+  await database.collection('departments').updateOne({_id:dep._id},{$set:{sections:[]}});
+  await database.collection('institutionPolicy').updateOne({_id:'institution'},{$set:{sectionRecords:[{code:'A',status:'active'},{code:'B',status:'inactive'},{code:'C',status:'active'}]}});const inactive=await preview(csv);assert.equal(inactive.errors,1);assert.match(inactive.rows[2].error,/configured section/);
+  await database.collection('institutionPolicy').updateOne({_id:'institution'},{$set:{sectionRecords:[{code:'A',status:'active',departmentId:'other-department'},{code:'B',status:'active'},{code:'C',status:'active'}]}});const foreign=await preview(csv);assert.equal(foreign.errors,2);assert.ok(foreign.rows.slice(0,2).every(r=>/configured section/.test(r.error)));
+  await database.collection('institutionPolicy').updateOne({_id:'institution'},{$unset:{sectionRecords:''}});
+  const missingMentor=await preview(csv.replace('ME-FAC-001','ME-MISSING'));assert.equal(missingMentor.errors,1);assert.match(missingMentor.rows[0].error,/mentor.*facultyId|facultyId.*ME-MISSING/);assert.doesNotMatch(missingMentor.rows[0].error,/configured section/);
+  await database.collection('users').updateOne({facultyId:'ME-FAC-001'},{$set:{isMentor:false}});const notMentor=await preview(csv);assert.equal(notMentor.errors,1);assert.match(notMentor.rows[0].error,/Mentor must be an active eligible/);
+  await database.collection('users').updateOne({facultyId:'ME-FAC-001'},{$set:{isMentor:true,accountStatus:'inactive'}});const inactiveMentor=await preview(csv);assert.equal(inactiveMentor.errors,1);assert.match(inactiveMentor.rows[0].error,/mentor|subject_faculty/i);
+  await database.collection('users').updateOne({facultyId:'ME-FAC-001'},{$set:{accountStatus:'active',department:'CSE',departmentId:'other-department'}});const wrongMentor=await preview(csv);assert.equal(wrongMentor.errors,1);assert.match(wrongMentor.rows[0].error,/Mentor belongs to another department/);
+ }finally{if(policy)await database.collection('institutionPolicy').replaceOne({_id:'institution'},policy);}
 });

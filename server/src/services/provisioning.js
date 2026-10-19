@@ -1,5 +1,5 @@
 import {isMentor,isFaculty,hasRole} from '../../../js/capabilities.js';
-import {sectionMaster} from './section-master.js';
+import {sectionMaster,studentSectionCodes} from './section-master.js';
 import {departmentCode} from '../../../js/department.js';
 import {isManager} from './roles.js';
 import {isInactive} from './account-removal.js';
@@ -68,7 +68,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
       row.usn=text(row.usn).toUpperCase();row.semester=Number(row.semester);row.section=text(row.section).toUpperCase();
       if(!/^[A-Z0-9-]{4,30}$/.test(row.usn)) fail('A valid USN is required.');
       if(!Number.isInteger(row.semester) || row.semester<1 || row.semester>12) fail('Semester must be an integer from 1 to 12.');
-      if(!p.sections.includes(row.section)||!(p.departmentRecords.find(d=>d.code===row.department)?.sections||p.sections).includes(row.section)) fail('Choose a configured section.');
+      if(!studentSectionCodes(p,p.departmentRecords.find(d=>d.code===row.department)).includes(row.section)) fail('Choose a configured section.');
       if(!row.scheme) fail('Scheme is required.');if(p.schemeRecords.length&&!p.schemeRecords.some(s=>s.code===row.scheme&&s.status==='active'&&(s.scope==='institution'||s.departmentIds?.includes(p.departmentRecords.find(d=>d.code===row.department)?.id))&&(!p.departmentRecords.find(d=>d.code===row.department)?.schemeIds?.length||p.departmentRecords.find(d=>d.code===row.department).schemeIds.includes(s.id))))fail('Choose an active scheme applicable to this department.');
     } else if(!row.facultyId || !/^[A-Z0-9_-]{1,80}$/.test(row.facultyId)) fail('Faculty/employee ID must contain letters, numbers, hyphens or underscores.');
     const master=p.departmentRecords.find(d=>d.code===row.department);

@@ -6,6 +6,13 @@ export function sectionMaster(policy={}) {
  for(const code of policy.sections||['A','B','C'])if(!records.has(code))records.set(code,{_id:'section_'+code,code,name:code,status:'active'});
  return [...records.values()].sort((a,b)=>a.code.localeCompare(b.code));
 }
+// An empty department list means the shared catalog shown by Academic Setup.
+// Explicit department restrictions and catalog ownership still bound admission.
+export function studentSectionCodes(policy={},department){
+ const code=value=>String(value??'').trim().toUpperCase(),id=department?.id||department?._id;
+ const configured=department?.sections?.length?new Set(department.sections.map(code)):null;
+ return [...new Set(sectionMaster(policy).filter(s=>s.status==='active'&&(!s.departmentId||s.departmentId===id)&&(!s.departmentIds?.length||s.departmentIds.includes(id))).map(s=>code(s.code)).filter(s=>s&&(!configured||configured.has(s))))];
+}
 export async function saveSection(database,client,actor,input){
  const code=String(input.code||'').trim().toUpperCase();
  if(!/^[A-Z0-9-]{1,10}$/.test(code)||!['active','inactive'].includes(input.status))fail('Choose a valid section code and status.');
