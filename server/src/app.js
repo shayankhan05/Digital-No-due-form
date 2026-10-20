@@ -1,3 +1,4 @@
+import {oversightRoutes} from './services/workflow-oversight.js';
 import {bulkExitRoutes} from './services/bulk-exit.js';
 import {permanentRemovalRoutes} from './services/permanent-removal.js';
 import {departmentSetupRoutes} from './services/department-setup.js';
@@ -29,6 +30,7 @@ export function createApp({database,client,auth,demo=false,origins=[],smtpPasswo
   app.post('/api/auth/password-complete',async(req,res)=>res.json(await completePasswordChange({store,auth,actor:req.actor,demo,key:firebaseWebApiKey,token:req.headers.authorization.slice(7)})));
   const provisionerOptions={db:store,auth,demo,sendActivation:async(email,link,policy)=>{if(firebaseWebApiKey){const response=await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(firebaseWebApiKey)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestType:'PASSWORD_RESET',email})});if(!response.ok)throw new Error('Firebase activation email delivery failed.');return;}if(!policy.smtpHost||!policy.smtpUser||!policy.mailFrom||!smtpPassword)throw new Error('Configure Firebase email API key or institution SMTP.');await nodemailer.createTransport({host:policy.smtpHost,port:policy.smtpPort,secure:policy.smtpPort===465,requireTLS:true,auth:{user:policy.smtpUser,pass:smtpPassword}}).sendMail({from:policy.mailFrom,to:email,subject:'Your Digital No-Due account has been created',text:`Set your password: ${link}`});}};const service=createProvisioner(provisionerOptions);collegeImportRoutes(app,{database,client,store,auth,provisionerOptions,service});departmentRoutes(app,{database,client,createDepartment:(actor,input)=>createDepartmentMaster({database,client,actor,input})});adminUpgradeRoutes(app,{database,client,auth,demo,provisioner:service});permanentRemovalRoutes(app,{database,client,auth});departmentSetupRoutes(app,{database,client});bulkExitRoutes(app,{database});
   app.post('/api/admin/account-removal',async(req,res)=>{if(req.body.uid)await scopedAdminInput(database,req.actor,req.body);res.json(await accountExit({database,client,auth,actor:req.actor,input:req.body,restoreStudent:(repository,uid)=>createProvisioner({db:repository,auth,demo}).restoreStudentMappings(uid)}));});
+  oversightRoutes(app,{store,database});
   app.use('/api/data',dataRoutes(store));
   app.use('/api/marks-csv',marksCsvRoutes(store));
   app.use('/api',resourceRoutes(store));

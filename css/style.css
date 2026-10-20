@@ -1868,3 +1868,11 @@ button, .btn-sm { font-size: 14px; line-height: 1.4; }
  html[data-theme="dark"] .manual-marks-table .marks-row,
  body.dark-theme .manual-marks-table .marks-row { background: #101010; border-color: #303030; }
 }
+
+/* Do not expose role-specific chrome until authentication and scope resolve. */
+body.auth-pending .app-shell { visibility: hidden; }
+#dashboardAuthLoading { display: none; }
+body.auth-pending #dashboardAuthLoading { display: block; }
+#workflowMonitor article, #workflowMonitor dialog { overflow-wrap: anywhere; }
+dialog.card { width: min(94vw, 520px); max-height: 90vh; overflow-y: auto; box-sizing: border-box; }
+.setup-guide details { margin: 12px 0; }

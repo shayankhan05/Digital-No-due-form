@@ -29,3 +29,27 @@ export function stageReady(request, stage) {
   return subjectsDone && (stage==='mentor' || request.mentorApproval?.status==='approved')
     && (stage!=='office' || request.hodApproval?.status==='approved');
 }
+
+export function effectiveRequest(raw){
+ if(!raw)return raw;const r={...raw,...(raw.approvalStates?{approvalStates:{...raw.approvalStates}}:{})};
+ for(const [key,o]of Object.entries(raw.effectiveOverrides||{})){
+  if(key in (r.approvalStates||{}))r.approvalStates[key]=o.decision;
+  else r[key+'Approval']={status:o.decision,remarks:o.reason,actorId:o.actorId,actedAt:o.at,overrideId:o.id};
+ }
+ return r;
+}
+
+// Shared prerequisite engine for effective decisions; downstream originals stay intact.
+export function recomputeEffectiveWorkflow(r){
+ const states=Object.values(r.approvalStates||{}),remaining=states.filter(s=>s!=='approved').length;
+ let status;
+ if(states.includes('rejected'))status=STATUS.REJECTED;
+ else if(remaining||!states.length)status=STATUS.PENDING_STAGE1;
+ else if(r.mentorApproval?.status==='rejected')status=STATUS.REJECTED;
+ else if(r.mentorApproval?.status!=='approved')status=STATUS.PENDING_MENTOR;
+ else if(r.hodApproval?.status==='rejected')status=STATUS.REJECTED;
+ else if(r.hodApproval?.status!=='approved')status=STATUS.PENDING_HOD;
+ else if(r.officeApproval?.status==='rejected')status=STATUS.REJECTED;
+ else status=(r.officeApproval?.status==='approved'||r.issuedAt)&&r.officeApproval?.status!=='pending'?STATUS.ISSUED:STATUS.CLEARED;
+ return {status,remaining};
+}

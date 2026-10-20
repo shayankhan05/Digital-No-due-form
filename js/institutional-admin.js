@@ -1,3 +1,4 @@
+import {mountWorkflowOversight} from './workflow-oversight.js';
 import {mountProvisioningForms} from './provisioning-forms.js';
 import {loadMasters} from './master-data.js';
 import {collegeImportHTML} from './college-import-formats.js';
@@ -58,7 +59,7 @@ async function render() {
     const lazy=(node,load)=>{if(!node)return;let loaded=false;const observer=new IntersectionObserver(entries=>{if(!loaded&&entries.some(entry=>entry.isIntersecting)){loaded=true;observer.disconnect();load().catch(error=>{(document.getElementById('policyStatus')||document.getElementById('accountStatus')).textContent=error.message;});}});observer.observe(node);};
     lazy(document.getElementById('policyForm'),async()=>{const policy=await api('policy'),form=document.getElementById('policyForm');form.elements.allowedDomains.value=(policy.allowedDomains||[]).join(', ');for(const key of ['smtpHost','smtpPort','smtpUser','mailFrom'])form.elements[key].value=policy[key]||'';if(isEmulator&&!form.elements.allowedDomains.value)form.elements.allowedDomains.value='demo.test';});
     const mentorLoad=async()=>{const mentors=await (await import('./api.js')).apiFetch('/api/administration/mentors');document.getElementById('mentorOptions').innerHTML=mentors.rows.map(m=>'<option value="'+e(m.email)+'">'+e(m.name)+' · '+e(m.facultyId)+'</option>').join('');};let mentorsLoaded=false;document.getElementById('accountForm').addEventListener('focusin',event=>{if(!mentorsLoaded&&['mentorEmail','mentorEmployeeId'].includes(event.target.name)){mentorsLoaded=true;mentorLoad().catch(error=>{mentorsLoaded=false;document.getElementById('accountStatus').textContent=error.message;});}});
-    await mountDepartmentManagement(actor);const masters=await loadMasters(),current=actor.role==='admin'?actor.departmentId:sessionStorage.getItem('department-context:'+actor.uid)||'';mountProvisioningForms(actor,masters,current);mountSuperWorkspace(content,actor);
+    await mountDepartmentManagement(actor);const masters=await loadMasters(),current=actor.role==='admin'?actor.departmentId:sessionStorage.getItem('department-context:'+actor.uid)||'';mountProvisioningForms(actor,masters,current);mountWorkflowOversight(content,actor,masters,current);mountSuperWorkspace(content,actor);
   } catch(error) {if(document.body.classList.contains('super-admin-page'))throw error;(document.getElementById('policyStatus')||document.getElementById('accountStatus')).textContent=`Account management unavailable: ${error.message}. Start the Functions emulator or deploy the backend. Please retry when the backend is available.`;}
 }
 function showPreview() {

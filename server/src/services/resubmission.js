@@ -15,9 +15,9 @@ export async function prepareResubmission(tx, request, requestId, stamp) {
     }
     const ref = tx.store.doc(`noDueRequests/${requestId}/approvals/${key}`);
     const previous = (await tx.get(ref)).data();
-    if (!previous || previous.status !== 'rejected') throw new Error('The rejected approval record is inconsistent. Ask the administrator to review it.');
+    if (!previous || previous.status !== 'rejected' && request.effectiveOverrides?.[key]?.decision !== 'rejected') throw new Error('The rejected approval record is inconsistent. Ask the administrator to review it.');
     const {history: previousHistory = [], ...decision} = previous;
-    const archived = {...decision, resubmittedAt: stamp};
+    const archived = {...decision, ...(request.effectiveOverrides?.[key]?{override:request.effectiveOverrides[key]}:{}), resubmittedAt: stamp};
     // Keep prior decision metadata verbatim in history; only clear the active decision.
     tx.update(ref, {status: 'pending', remarks: '', actedBy: null, actorId: null, actedAt: null,
       history: [...previousHistory, archived], resubmittedAt: stamp});
