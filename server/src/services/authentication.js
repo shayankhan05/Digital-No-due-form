@@ -1,3 +1,4 @@
+import {departmentAccessError} from './department-access.js';
 import {accountStateError} from '../../../js/account-state.js';
 import {accountAuthority} from './account-authority.js';
 const invalid=()=>Object.assign(new Error('Email / USN / Employee ID or password is incorrect.'),{code:'unauthenticated'});
@@ -19,7 +20,7 @@ export function authenticationRoutes(app,{database,store,auth,demo,key}){
   app.post('/api/auth/login',async(req,res)=>{
     const now=Date.now(),address=req.ip,old=attempts.get(address),budget=old&&old.until>now?old:{count:0,until:now+600000};budget.count++;attempts.set(address,budget);if(attempts.size>10000)for(const [ip,v]of attempts)if(v.until<now)attempts.delete(ip);
     if(budget.count>100)return res.status(429).json({error:{code:'too-many-requests',message:'Too many attempts. Wait a bit and try again.'}});
-    try{if(typeof req.body.password!=='string'||!req.body.password||req.body.password.length>4096)throw invalid();const p=await loginIdentity(database,req.body.identifier),signed=await firebasePasswordCall(auth,demo,key,'signInWithPassword',{email:p.email,password:req.body.password,returnSecureToken:true});if(!signed.ok||signed.result.localId!==p._id)throw invalid();res.json({email:p.email});}catch(error){const state=['account/inactive','account/exited','account/not-found'].includes(error.code);res.status(401).json({error:{code:state?error.code:'unauthenticated',message:state?error.message:invalid().message}});}
+    try{if(typeof req.body.password!=='string'||!req.body.password||req.body.password.length>4096)throw invalid();const p=await loginIdentity(database,req.body.identifier),signed=await firebasePasswordCall(auth,demo,key,'signInWithPassword',{email:p.email,password:req.body.password,returnSecureToken:true});if(!signed.ok||signed.result.localId!==p._id)throw invalid();const departmentState=await departmentAccessError(database,p,p._id);if(departmentState)throw Object.assign(new Error(departmentState.message),{code:departmentState.code});res.json({email:p.email});}catch(error){const state=['account/inactive','account/exited','account/not-found','department/inactive'].includes(error.code);res.status(401).json({error:{code:state?error.code:'unauthenticated',message:state?error.message:invalid().message}});}
   });
 }
 export async function completePasswordChange({store,auth,actor,demo,key,token}){

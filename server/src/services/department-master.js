@@ -1,3 +1,4 @@
+import {withUsedSchemes} from './department-schemes.js';
 import {isVisibleScheme} from '../../../js/scheme-visibility.js';
 import {sectionDetailRoutes} from './section-details.js';
 import {retireHodAuthority} from './account-authority.js';
@@ -74,7 +75,7 @@ export function departmentRoutes(app,{database,client,createDepartment}){
    req.actor.role==='super_admin'?database.collection('users').find({role:{$in:['admin','hod']}}).toArray():Promise.resolve([]),
    database.collection('users').find({role:{$in:['hod','office','library','accounts','physics_lab','chemistry_lab']},accountStatus:{$nin:['inactive','deleted','deactivating','deleting','exited','exiting']}}).toArray()
   ]);
-  res.json({institutionServices:services,sections:sectionMaster(policy||{}),departments,schemes:schemes.filter(isVisibleScheme),leadershipAccounts:leadership.map(u=>({uid:u._id,name:u.name,email:u.email,role:u.role,departmentId:u.departmentId,facultyId:u.facultyId,accountStatus:u.accountStatus||'active',eligible:eligibleConfigurationAccount(u)})),workflowAccounts:workflow.filter(u=>eligibleConfigurationAccount(u)&&(req.actor.role==='super_admin'||u.scope==='institution'||u.departmentId===req.actor.managementDepartmentId)).map(u=>({uid:u._id,name:u.name,email:u.email,role:u.role,scope:u.scope,departmentId:u.departmentId}))});
+  res.json({institutionServices:services,sections:sectionMaster(policy||{}),departments:await withUsedSchemes(database,departments,schemes),schemes:schemes.filter(isVisibleScheme),leadershipAccounts:leadership.map(u=>({uid:u._id,name:u.name,email:u.email,role:u.role,departmentId:u.departmentId,facultyId:u.facultyId,accountStatus:u.accountStatus||'active',eligible:eligibleConfigurationAccount(u)})),workflowAccounts:workflow.filter(u=>eligibleConfigurationAccount(u)&&(req.actor.role==='super_admin'||u.scope==='institution'||u.departmentId===req.actor.managementDepartmentId)).map(u=>({uid:u._id,name:u.name,email:u.email,role:u.role,scope:u.scope,departmentId:u.departmentId}))});
  });
  app.get('/api/administration/leadership-candidates',async(req,res)=>{
   if(req.actor.role!=='super_admin')fail('Only Super Admin assigns leadership.','permission-denied');

@@ -1,3 +1,4 @@
+import {mountInactiveAccounts} from './inactive-accounts.js';
 import {roleLabel,accountLabel} from './display-labels.js';
 import {departmentLabel} from './department.js';
 import {post,apiFetch} from './api.js';
@@ -72,10 +73,11 @@ export function mountExitManagement(host,actor={}){
  for(const id of ['exitDirectoryKind','exitDirectoryStatus'])q(id).onchange=()=>loadDirectory();q('exitDirectoryMore').onclick=()=>loadDirectory(true);
  for(const [id,kind]of [['exportActiveStudents','student'],['exportActiveFaculty','faculty'],['exportExitDirectory',null]])q(id).onclick=async event=>{event.target.disabled=true;try{if(!kind&&q('exitDirectoryStatus').value==='none'){q('exitDirectoryMessage').textContent='Choose a status before exporting the directory.';return;}const result=await post(endpoint,{action:'export',kind:kind||q('exitDirectoryKind').value,status:kind?'active':q('exitDirectoryStatus').value});downloadCSV(result);q('exitDirectoryMessage').textContent=`Exported ${result.count} accounts.`;}catch(error){q('exitDirectoryMessage').textContent=error.message;}finally{event.target.disabled=false;}};
  const card=q('exitDirectory').closest('.card'),details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='CSV exports / advanced account directory';card.before(details);details.append(summary,card);details.addEventListener('toggle',()=>{if(details.open&&!rows.length)loadDirectory();});
+ mountInactiveAccounts(host,actor,refresh);
  return {refresh};
 }
 
-function exitInstitution(account,kind,refresh){
+export function exitInstitution(account,kind,refresh){
  const {dialog,close}=dialogShell('institutionExitDialog','Permanent Institutional Exit',`${exitIdentityHTML(account)}<p>This account will lose access and be removed from active institutional rosters. Historical academic and workflow records will be preserved.</p><label>Reason<textarea id="institutionExitReason" maxlength="1000" required></textarea></label><label><input id="institutionExitCheck" type="checkbox" class="action-confirmation"> I understand the permanent institutional exit.</label><p id="institutionExitStatus" role="status"></p><div class="provision-actions"><button type="button" id="confirmInstitutionExit" class="btn-primary" disabled>Confirm institutional exit</button><button type="button" id="cancelInstitutionExit" class="btn-sm">Cancel</button></div>`);
  const check=dialog.querySelector('#institutionExitCheck'),reason=dialog.querySelector('textarea'),confirm=dialog.querySelector('#confirmInstitutionExit');const validate=()=>confirm.disabled=!check.checked||!reason.value.trim();check.onchange=reason.oninput=validate;dialog.querySelector('#cancelInstitutionExit').onclick=close;confirm.onclick=async()=>{confirm.disabled=true;try{const result=await post(endpoint,{action:'institutional-exit',kind,uid:account.uid,confirmation:'EXIT',reason:reason.value.trim()});dialog.querySelector('#institutionExitStatus').textContent=result.message;confirm.hidden=true;check.disabled=reason.disabled=true;await refresh();}catch(error){dialog.querySelector('#institutionExitStatus').textContent=error.message;validate();}};
 }

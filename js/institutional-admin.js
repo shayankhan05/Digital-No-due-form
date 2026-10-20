@@ -51,9 +51,8 @@ async function render() {
   mountCollegeImport();
   document.getElementById('searchBtn').onclick=event=>busy(event.target,async()=>{
     const result=await api('directory',{field:document.getElementById('searchField').value,value:document.getElementById('searchValue').value});
-    document.getElementById('searchResults').innerHTML=result.rows.map(r=>`<div class="row"><span>${e(r.name)} · ${e(r.email)} · ${e(roleLabel(r.role))}<br>${e(r.usn || r.facultyId)}<br>Status: ${e(r.accountStatus || "active")}</span>${["inactive","deleted","deactivating"].includes(r.accountStatus)?"":`<button class="btn-sm retry-activation" data-uid="${e(r.uid)}">Retry activation email</button>`}${!['admin','super_admin'].includes(r.role)?`<button class="btn-sm" data-remove-account="${e(r.uid)}">${r.accountStatus==="inactive"?"View inactive account":"Deactivate Account"}</button>`:""}</div>`).join('') || 'No account found.';
+    document.getElementById('searchResults').innerHTML=result.rows.map(r=>`<div class="row"><span>${e(r.name)} · ${e(r.email)} · ${e(roleLabel(r.role))}<br>${e(r.usn || r.facultyId)}<br>Status: ${e(r.accountStatus || "active")}</span>${!['admin','super_admin'].includes(r.role)?`<button class="btn-sm" data-remove-account="${e(r.uid)}">${r.accountStatus==="inactive"?"View inactive account":"Deactivate Account"}</button>`:""}</div>`).join('') || 'No account found.';
     wireAccountRemoval(document.getElementById('searchResults'),async()=>{await exitManager.refresh();document.getElementById('searchBtn').click();});
-    document.querySelectorAll('.retry-activation').forEach(b=>b.onclick=()=>busy(b,async()=>{const delivery=await api('retryActivation',{uid:b.dataset.uid});alert(delivery.warning || `Activation: ${delivery.activation}`);}));
   });
   try {
     const lazy=(node,load)=>{if(!node)return;let loaded=false;const observer=new IntersectionObserver(entries=>{if(!loaded&&entries.some(entry=>entry.isIntersecting)){loaded=true;observer.disconnect();load().catch(error=>{(document.getElementById('policyStatus')||document.getElementById('accountStatus')).textContent=error.message;});}});observer.observe(node);};

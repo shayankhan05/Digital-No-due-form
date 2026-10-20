@@ -28,6 +28,7 @@ const ROLE_HOME = {
   super_admin: "super-admin-dashboard.html",
 };
 const PROFILE_ERROR = "Your account exists but your institutional profile is not yet configured. Contact administrator.";
+document.getElementById('logoutBtn')?.parentElement.classList.add('top-actions');
 let intentionalSignOut = false;
 let passwordChangeInProgress = false;
 export const setPasswordChangeInProgress = value => {passwordChangeInProgress=!!value;};
@@ -66,11 +67,11 @@ export function requireAuth(roles = null,{allowPasswordChange=false}={}) {
       if(initial&&(initial.uid!==profile.uid||initial.role!==profile.role)){redirect(profile);return;}
       if(settled)return;
       initial={uid:profile.uid,role:profile.role};settled=true;
-      await mountDepartmentContext(profile).catch(()=>{});if(redirecting||auth.currentUser?.uid!==profile.uid)return;if(isMentor(profile)&&!document.getElementById('mentorCapabilityLink')){const a=document.createElement('a');a.id='mentorCapabilityLink';a.className='btn-sm';a.href='mentor-dashboard.html';a.textContent='My mentees';document.getElementById('logoutBtn')?.parentNode.append(a);}if(isFaculty(profile)&&!document.getElementById('subjectCapabilityLink')){const a=document.createElement('a');a.id='subjectCapabilityLink';a.className='btn-sm';a.href='approver-dashboard.html#requests';a.textContent='Subject clearances';document.getElementById('logoutBtn')?.parentNode.append(a);}if(profile.role==='hod'&&!document.getElementById('hodCapabilityLink')){const a=document.createElement('a');a.id='hodCapabilityLink';a.className='btn-sm';a.href='hod-dashboard.html#requests';a.textContent='HOD final approvals';document.getElementById('logoutBtn')?.parentNode.append(a);}resolve(profile);
+      await mountDepartmentContext(profile).catch(()=>{});if(redirecting||auth.currentUser?.uid!==profile.uid)return;if(isMentor(profile)&&!document.getElementById('mentorCapabilityLink')){const a=document.createElement('a');a.id='mentorCapabilityLink';a.className='btn-sm';a.href='mentor-dashboard.html';a.textContent='My mentees';document.getElementById('logoutBtn')?.parentNode.append(a);}if(isFaculty(profile)&&!location.pathname.endsWith('/approver-dashboard.html')&&!document.getElementById('subjectCapabilityLink')){const a=document.createElement('a');a.id='subjectCapabilityLink';a.className='btn-sm';a.href='approver-dashboard.html#requests';a.textContent='Approval Desk';document.getElementById('logoutBtn')?.parentNode.append(a);}if(profile.role==='hod'&&!document.getElementById('hodCapabilityLink')){const a=document.createElement('a');a.id='hodCapabilityLink';a.className='btn-sm';a.href='hod-dashboard.html#requests';a.textContent='HOD final approvals';document.getElementById('logoutBtn')?.parentNode.append(a);}resolve(profile);
       if (!allowPasswordChange) showPasswordReminder(profile);
       } catch (error) {
         if(run!==generation||intentionalSignOut||passwordChangeInProgress)return;
-        if(['unauthenticated','account/inactive','account/leadership-revoked','institution/profile-missing'].includes(error.code)){redirect();return;}
+        if(['unauthenticated','account/inactive','department/inactive','account/leadership-revoked','institution/profile-missing'].includes(error.code)){redirect();return;}
         if(!settled)reject(error);
       }
     };
@@ -103,6 +104,7 @@ export function wireLogout() {
 export function wireLoginForm() {
   const form = document.getElementById("loginForm");
   if (!form) return;
+  const blocked=sessionStorage.getItem('departmentInactiveNotice');if(blocked){sessionStorage.removeItem('departmentInactiveNotice');const el=document.getElementById('loginError');el.textContent=blocked;el.classList.remove('hidden');}
   const notice=sessionStorage.getItem('passwordChangedNotice');
   if(notice){sessionStorage.removeItem('passwordChangedNotice');const banner=document.createElement('p');banner.className='banner';banner.id='passwordChangedNotice';banner.setAttribute('role','status');banner.textContent=notice;form.before(banner);}
 
@@ -140,7 +142,7 @@ sessionStorage.removeItem(reminderKey(profile.uid));
 window.location.href = home;
     } catch (err) {
       if (err.code === "institution/profile-missing") await signOut(auth);
-      errorEl.textContent = err.code === "institution/profile-missing" ? PROFILE_ERROR : ['unauthenticated','too-many-requests','account/inactive','account/exited','account/not-found'].includes(err.code)?err.message:friendlyAuthError(err.code);
+      errorEl.textContent = err.code === "institution/profile-missing" ? PROFILE_ERROR : ['unauthenticated','too-many-requests','account/inactive','account/exited','account/not-found','department/inactive'].includes(err.code)?err.message:friendlyAuthError(err.code);
       errorEl.classList.remove("hidden");
       submitBtn.disabled = false;
       submitBtn.textContent = "Log in";
@@ -182,3 +184,5 @@ export async function signOutAndClear(){
   try { await signOut(auth); } catch(error) { intentionalSignOut = false; throw error; }
   for(const key of Object.keys(sessionStorage))if(key.startsWith('temporary-password-reminder:')||key.startsWith('noDueSubmitKey:')||key.startsWith('department-context:'))sessionStorage.removeItem(key);
 }
+
+let departmentRedirecting=false;window.addEventListener('auth:department-inactive',async event=>{if(departmentRedirecting||document.getElementById('loginForm'))return;departmentRedirecting=true;document.getElementById('content')?.replaceChildren();document.querySelectorAll('dialog').forEach(d=>d.remove());sessionStorage.setItem('departmentInactiveNotice',event.detail);try{await signOutAndClear();}finally{location.replace('login.html');}});

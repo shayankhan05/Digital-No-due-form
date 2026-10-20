@@ -1,3 +1,9 @@
+export function allowedCollegeDomains(values,existing={},demo=false){
+ if(!Array.isArray(values))throw Object.assign(Error('Configure valid college domains.'),{code:'invalid-argument'});
+ const domains=[...new Set(values.map(v=>String(v||'').trim().toLowerCase().replace(/^@/,'')))];
+ if(!domains.length||domains.length>20||domains.some(d=>!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(d)||!demo&&d==='demo.test'&&!existing.allowedDomains?.includes(d)&&!existing.demoStudentProvisioningEnabled&&!existing.demoStaffProvisioningEnabled))throw Object.assign(Error('Configure valid college domains; production cannot add demo.test without an existing demo policy.'),{code:'invalid-argument'});
+ return domains;
+}
 import {assertSemester} from '../../../js/semester.js';
 import {isMentor,isFaculty,hasRole} from '../../../js/capabilities.js';
 import {sectionMaster,studentSectionCodes} from './section-master.js';
@@ -524,9 +530,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     }while(true);
   }
   async function savePolicy(input,actorId) {
-    const allowedDomains=[...new Set((input.allowedDomains || []).map(d=>text(d).toLowerCase().replace(/^@/,'')))];
-    const existingPolicy=await policy();if(existingPolicy.departmentRecords.length){input={...input,departments:existingPolicy.departments,schemes:existingPolicy.schemes,sections:existingPolicy.sections};}
-    if(!allowedDomains.length || allowedDomains.length>20 || allowedDomains.some(d=>!/^([a-z0-9-]+\.)+[a-z]{2,}$/.test(d) || (!demo && d==='demo.test' && !existingPolicy.allowedDomains.includes(d)))) fail('Configure valid college domains; production cannot add demo.test.');
+    const existingPolicy=await policy(),allowedDomains=allowedCollegeDomains(input.allowedDomains||[],existingPolicy,demo);if(existingPolicy.departmentRecords.length){input={...input,departments:existingPolicy.departments,schemes:existingPolicy.schemes,sections:existingPolicy.sections};}
     const departmentNames=new Map(existingPolicy.departments.map(value=>[value.toLowerCase(),value]));
     const departments=[...new Map((input.departments || []).map(v=>{const canonical=canonicalDepartment(v,existingPolicy.departmentAliases),key=canonical.toLowerCase();if(!departmentNames.has(key))departmentNames.set(key,canonical);return [key,departmentNames.get(key)];})).values()],sections=[...new Set((input.sections || existingPolicy.sections).map(s=>text(s).toUpperCase()))];
     if(!departments.length || departments.length>50 || departments.some(d=>!d || d.length>100) || !sections.length || sections.length>50 || sections.some(s=>! /^[A-Z0-9-]{1,10}$/.test(s))) fail('Configure departments and sections.');
