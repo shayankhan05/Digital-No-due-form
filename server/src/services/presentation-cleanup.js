@@ -2,7 +2,7 @@ import {recordDigest} from './presentation-reset.js';
 import {createHash} from 'node:crypto';
 const lower=v=>String(v||'').trim().toLowerCase();
 const blocked=u=>['inactive','exited','deleted','deleting','exiting','deactivating'].includes(u.accountStatus);
-const generatedName=/^(?:synthetic|demo|test|load)(?:\s+(?:ise|cse))?\s+student\b|^student\s*\d+$/i;
+const generatedName=/^(?:synthetic|demo|test|load)\b.*\bstudent\b|^student\s*\d+$/i;
 const generatedEmail=/^(?:(?:ise|cse)-demo-)?1ay\d+[a-z]+\d+@demo\.test$|^(?:student|synthetic|demo-student|test-student)\d+@demo\.test$/i;
 const first=['Aarav','Zoya','Kabir','Riya','Aditya','Sana','Armaan','Meera','Gurpreet','Rohan','Ayesha','Neil','Simran','Reyansh','Ananya','Ishaan','Sara','Dev','Anika','Vihaan'];
 const last=['Sharma','Khan','Singh',"D'Souza",'Nair','Joseph','Siddiqui','Iyer','Kaur','Verma','Rahman','Thomas','Patel','Rao','Kapoor','Menon','Qureshi','Mehta','Das','Reddy'];
