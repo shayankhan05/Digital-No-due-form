@@ -46,6 +46,7 @@ const ROLE_LABELS = {
   library: "Library in-charge",
   physics_lab: "Physics lab in-charge",
   chemistry_lab: "Chemistry lab in-charge",
+  sports: "Sports Incharge",
   accounts: "Accounts in-charge"
 };
 
@@ -54,7 +55,7 @@ const ROLE_LABELS = {
 // AUTHENTICATION
 // ============================================================
 
-requireAuth(["subject_faculty", "library", "physics_lab", "chemistry_lab", "accounts", "mentor"]).then(async (approver) => {
+requireAuth(["subject_faculty", "library", "physics_lab", "chemistry_lab", "sports", "accounts", "mentor"]).then(async (approver) => {
 
   currentApprover = approver;
 
@@ -100,7 +101,7 @@ function startApprovalListener(approver) {
         const r = request.data();
         if (r.status === "rejected" && !Object.values(r.approvalStates || {}).includes("rejected")) return [];
         return Object.entries(r.approvalItems || {}).filter(([id, item]) => item.approverId === approver.uid && r.approvalStates[id] === "pending"
-          && ["subject_faculty","library","accounts","physics_lab","chemistry_lab"].includes(item.approverType)
+          && ["subject_faculty","library","accounts","physics_lab","chemistry_lab","sports"].includes(item.approverType)
           && (item.approverType!=="subject_faculty" || item.teacherUid===approver.uid && taughtOfferings.has(item.offeringId)))
           .map(([id, item]) => ({ id, ref: { path: `noDueRequests/${request.id}/approvals/${id}` }, data: () => ({ ...item, studentName: r.studentName, usn: r.usn, section: r.section, studentDepartmentName:r.studentDepartmentName||r.department||item.department||'' }) }));
       });
@@ -900,6 +901,7 @@ function getShortRole(role) {
 
     chemistry_lab: "Chemistry",
 
+    sports: "Sports",
     accounts: "Accounts",
 
     subject_faculty: "Faculty"

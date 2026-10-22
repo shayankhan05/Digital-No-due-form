@@ -9,7 +9,7 @@ import {isInactive} from '../../../js/account-state.js';
 export {isInactive};
 const fail = (message,code='invalid-argument') => {throw Object.assign(new Error(message),{code});};
 const pendingStatuses=['pending_stage1','pending_mentor','pending_hod','pending_office','rejected','cleared'];
-export const facultyRoles=['subject_faculty','mentor','hod','office','library','accounts','physics_lab','chemistry_lab'];
+export const facultyRoles=['subject_faculty','mentor','hod','office','library','accounts','physics_lab','chemistry_lab','sports'];
 
 async function exitIdentity(database,uid,{profile,student,offerings,blockers}){
  const mentor=student?.mentorId?await database.collection('users').findOne({_id:student.mentorId}):null;

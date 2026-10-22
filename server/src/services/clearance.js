@@ -3,8 +3,8 @@ import {departmentCode} from '../../../js/department.js';
 import {isInactive} from './account-removal.js';
 import {FieldValue} from './values.js';
 
-export const REQUIRED_SERVICES=['library','accounts'];
-export const requiredServices=config=>[...REQUIRED_SERVICES,...['physics_lab','chemistry_lab'].filter(type=>config?.[type])];
+export const REQUIRED_SERVICES=['library','accounts','sports'];
+export const requiredServices=(config,semester)=>[...REQUIRED_SERVICES,...(Number(semester)>=1&&Number(semester)<=2?['physics_lab','chemistry_lab']:[])];
 const text=v=>String(v ?? '').trim();
 const department=v=>departmentCode(v).toLowerCase();
 export function matchesStudent(student,offering) {
@@ -21,13 +21,13 @@ export function subjectItem(uid,student,offering,teacher) {
     semester:Number(student.semester),section:text(student.section).toUpperCase()};
 }
 export async function workflowFor(db,student){
- if(student?.departmentId){const specific=(await db.doc('departmentWorkflows/'+student.departmentId).get()).data();if(specific)return specific;}
+ if(student?.departmentId){const specific=(await db.doc('departmentWorkflows/'+student.departmentId).get()).data();if(specific){if(!specific.sports){const shared=(await db.doc('settings/workflow').get()).data();if(shared?.sports)return {...specific,sports:shared.sports};}return specific;}}
  // Once department masters exist, never guess a department or fall back to the
  // historical shared Office. Unconfigured identities require explicit setup.
  if(!(await db.collection('departments').limit(1).get()).empty)return null;
  return (await db.doc('settings/workflow').get()).data();
 }
-export async function enrollmentPlan(db,uid) {
+export async function enrollmentPlan(db,uid,{existingRequest=null}={}) {
   const student=(await db.doc(`students/${uid}`).get()).data(),config=await workflowFor(db,student);
   if(!student || !config) throw new Error('Student profile and workflow assignments are required.');
   const enrolled=await db.collection('enrollments').where('studentId','==',uid).where('active','==',true).get();
@@ -43,10 +43,12 @@ export async function enrollmentPlan(db,uid) {
   }
   const count=Object.keys(items).length;
   if(!count || count>30) throw new Error('Assign 1–30 active subjects matching the student academic context.');
-  for(const type of requiredServices(config)) {
+  // Existing requests retain their original service stages; new requests use the new semester policy.
+  const serviceTypes=existingRequest?[...new Set(Object.values(existingRequest.approvalItems||{}).map(i=>i.approverType).filter(t=>['library','accounts','sports','physics_lab','chemistry_lab'].includes(t)))]:requiredServices(config,student.semester);
+  for(const type of serviceTypes) {
     const user=config[type] && (await db.doc(`users/${config[type]}`).get()).data();
-    if(user?.role!==type||isInactive(user)) throw new Error(`Configure the ${type} approver.`);
-    items[type]={approverType:type,approverId:config[type],label:type,subjectCode:null,offeringId:null};
+    if(user?.role!==type||isInactive(user)||type==='sports'&&user.scope!=='institution') throw new Error(`Configure the ${type} approver.`);
+    items[type]={approverType:type,approverId:config[type],label:type==='sports'?'Sports Incharge':type,subjectCode:null,offeringId:null};
   }
   for(const [id,role] of [[student.mentorId,'mentor'],[config.hodId,'hod'],[config.officeId,'office']]) {
     const person=id&&(await db.doc(`users/${id}`).get()).data();if(role==='office'&&config.officeScopeVersion===2&&person?.scope!=='department')throw new Error('Configure the department Office.');if(role==='office'&&person?.scope==='department'&&(!student.departmentId||person.departmentId!==student.departmentId))throw new Error('Configure the Office for the student department.');if(!person||isInactive(person)||(role==='mentor'?!isMentor(person):person.role!==role)) throw new Error(`Configure the assigned ${role}.`);

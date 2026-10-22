@@ -15,7 +15,7 @@ export async function canRead(store,actor,path,data){
   if(collection==='offerings'){if(data.teacherId===uid)return true;if(isMentor(actor)){const enrolled=await store.collection('enrollments').where('offeringId','==',id).where('mentorId','==',uid).where('active','==',true).limit(1).get();return !enrolled.empty;}if(role==='student'){const enrolled=await store.collection('enrollments').where('studentId','==',uid).where('offeringId','==',id).where('active','==',true).limit(1).get(),s=(await store.doc(`students/${uid}`).get()).data();return !enrolled.empty&&enrolled.docs[0].data().teacherId===data.teacherId&&matchesStudent(s||{},data);}return false;}
   if(['enrollments','marks'].includes(collection)){const s=(await store.doc(`students/${data.studentId}`).get()).data();if(data.studentId===uid||isMentor(actor)&&s?.mentorId===uid)return true;const o=(await store.doc(`offerings/${data.offeringId}`).get()).data();return isFaculty(actor)&&data.teacherId===uid&&o?.teacherId===uid&&matchesStudent(s||{},o);}
   if(collection==='assignments'){const o=(await store.doc(`offerings/${data.offeringId}`).get()).data();return !!o&&canRead(store,actor,`offerings/${data.offeringId}`,o);}
-  if(collection==='noDueRequests'){const r=child?(await store.doc(`noDueRequests/${id}`).get()).data():data;return !!r&&(r.studentId===uid||isMentor(actor)&&r.mentorId===uid||role==='hod'&&r.hodId===uid||role==='office'&&r.officeId===uid||(isFaculty(actor)||['library','accounts','physics_lab','chemistry_lab'].includes(role))&&r.approverIds?.includes(uid));}
+  if(collection==='noDueRequests'){const r=child?(await store.doc(`noDueRequests/${id}`).get()).data():data;return !!r&&(r.studentId===uid||isMentor(actor)&&r.mentorId===uid||role==='hod'&&r.hodId===uid||role==='office'&&r.officeId===uid||(isFaculty(actor)||['library','accounts','physics_lab','chemistry_lab','sports'].includes(role))&&r.approverIds?.includes(uid));}
   return false;
 }
 export async function scopeQuery(store,actor,path,query){
@@ -29,7 +29,7 @@ export async function scopeQuery(store,actor,path,query){
   if(collection==='students'){if(role==='mentor'||isMentor(actor)&&query.filters.some(([f,op,v])=>f==='mentorId'&&op==='=='&&v===uid))return query.where('mentorId','==',uid);if(isFaculty(actor))return query.where('teacherIds','array-contains',uid);if(role==='student')return query.where('__name__','==',uid);}
   if(collection==='offerings'){if(isFaculty(actor))return query.where('teacherId','==',uid);if(role==='student'){const s=(await store.doc(`students/${uid}`).get()).data();return query.where('__name__','in',s?.offeringIds||[]);}}
   if(['enrollments','marks'].includes(collection)){if(role==='student')return query.where('studentId','==',uid);if(isFaculty(actor))return query.where(isMentor(actor)&&!query.filters.some(([field,op,value])=>field==='teacherId'&&op==='=='&&value===uid)?'mentorId':'teacherId','==',uid);}
-  if(collection==='users'&&['office','hod','library','accounts','physics_lab','chemistry_lab'].includes(role))return query.where('__name__','==',uid);
+  if(collection==='users'&&['office','hod','library','accounts','physics_lab','chemistry_lab','sports'].includes(role))return query.where('__name__','==',uid);
   if(['subjects','assignments','users'].includes(collection))return query;
   throw Object.assign(new Error('Forbidden collection.'),{code:'permission-denied'});
 }

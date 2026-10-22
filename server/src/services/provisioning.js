@@ -14,7 +14,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import {FieldValue,HttpsError} from './values.js';
 
 import {matchesStudent,subjectItem,workflowFor,requiredServices} from './clearance.js';
-const roles=['super_admin','admin','student','subject_faculty','mentor','hod','office','library','physics_lab','chemistry_lab','accounts'];
+const roles=['super_admin','admin','student','subject_faculty','mentor','hod','office','library','physics_lab','chemistry_lab','sports','accounts'];
 const text=v=>String(v??'').trim();
 const hash=v=>createHash('sha256').update(v).digest('hex');
 const stamp=()=>FieldValue.serverTimestamp();
@@ -63,7 +63,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   function normalize(input,p) {
     const row={role:'student',...input};
     row.name=text(row.name);row.collegeEmail=email(row.collegeEmail || row.email);row.department=canonicalDepartment(row.department,p.departmentAliases);
-    row.scope=['admin','student','subject_faculty','mentor','hod','office'].includes(row.role)?'department':row.role==='accounts'?'institution':row.scope==='department'?'department':'institution';if(row.role==='accounts'){row.department='';row.departmentId=null;}if(row.isMentor!==undefined){if(![true,false,'true','false'].includes(row.isMentor))fail('is_mentor must be true or false.');row.isMentor=row.isMentor===true||row.isMentor==='true';if(row.isMentor&&!['subject_faculty','mentor'].includes(row.role))fail('Only faculty can have mentor capability.');}row.phone=text(row.phone);row.scheme=text(row.scheme);row.facultyId=text(row.facultyId || row.employeeId).toUpperCase();
+    row.scope=['admin','student','subject_faculty','mentor','hod','office'].includes(row.role)?'department':['accounts','sports'].includes(row.role)?'institution':row.scope==='department'?'department':'institution';if(['accounts','sports'].includes(row.role)){row.department='';row.departmentId=null;}if(row.isMentor!==undefined){if(![true,false,'true','false'].includes(row.isMentor))fail('is_mentor must be true or false.');row.isMentor=row.isMentor===true||row.isMentor==='true';if(row.isMentor&&!['subject_faculty','mentor'].includes(row.role))fail('Only faculty can have mentor capability.');}row.phone=text(row.phone);row.scheme=text(row.scheme);row.facultyId=text(row.facultyId || row.employeeId).toUpperCase();
     if(!roles.includes(row.role)) fail('Unsupported role.');
     if(!row.name || row.name.length>150) fail('Name is required (maximum 150 characters).');
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.collegeEmail)) fail('Valid college email is required.');
@@ -261,7 +261,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   async function planFor(student,offerings) {
     const config=await workflowFor(db,student);
     if(!config) fail('Configure workflow assignments before enrolling students.');
-    const services=requiredServices(config);
+    const services=requiredServices(config,student.semester);
     const items={};
     for(const type of services) items[type]={approverType:type,approverId:config[type],label:type.replaceAll('_',' '),subjectCode:null,offeringId:null};
     const requirements=[...services.map(role=>[config[role],role]),[student.mentorId,'mentor'],[config.hodId,'hod'],[config.officeId,'office'],...offerings.map(o=>[o.teacherId,'teaching'])];
@@ -534,10 +534,10 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     const departmentNames=new Map(existingPolicy.departments.map(value=>[value.toLowerCase(),value]));
     const departments=[...new Map((input.departments || []).map(v=>{const canonical=canonicalDepartment(v,existingPolicy.departmentAliases),key=canonical.toLowerCase();if(!departmentNames.has(key))departmentNames.set(key,canonical);return [key,departmentNames.get(key)];})).values()],sections=[...new Set((input.sections || existingPolicy.sections).map(s=>text(s).toUpperCase()))];
     if(!departments.length || departments.length>50 || departments.some(d=>!d || d.length>100) || !sections.length || sections.length>50 || sections.some(s=>! /^[A-Z0-9-]{1,10}$/.test(s))) fail('Configure departments and sections.');
-    const smtpPort=Number(input.smtpPort || 465);if(![465,587].includes(smtpPort)) fail('SMTP port must be 465 or 587.');
+    const smtpPort=Number(input.smtpPort ?? existingPolicy.smtpPort ?? 465);if(![465,587].includes(smtpPort)) fail('SMTP port must be 465 or 587.');
     const schemes=[...new Set((input.schemes || existingPolicy.schemes).map(v=>text(v).replace(/\s+scheme$/i,'').toUpperCase()))];
     if(!schemes.length || schemes.length>50 || schemes.some(v=>! /^[A-Z0-9_-]{1,30}$/.test(v)))fail('Configure valid schemes.');
-    const data={allowedDomains,departments,schemes,sections,...(existingPolicy.departmentAliases?{departmentAliases:existingPolicy.departmentAliases}:{}),smtpHost:text(input.smtpHost),smtpPort,smtpUser:text(input.smtpUser),mailFrom:text(input.mailFrom),updatedAt:stamp()};
+    const data={allowedDomains,departments,schemes,sections,...(existingPolicy.departmentAliases?{departmentAliases:existingPolicy.departmentAliases}:{}),smtpHost:text(input.smtpHost ?? existingPolicy.smtpHost),smtpPort,smtpUser:text(input.smtpUser ?? existingPolicy.smtpUser),mailFrom:text(input.mailFrom ?? existingPolicy.mailFrom),updatedAt:stamp()};
     if(data.smtpHost && !/^[a-zA-Z0-9.-]+$/.test(data.smtpHost)) fail('Invalid SMTP host.');
     await db.runTransaction(async tx=>{tx.set(db.doc('settings/institution'),data,{merge:true});tx.create(db.collection('accountExitEvents').doc(),{action:'institution_settings_updated',actorId,at:stamp(),fields:Object.keys(data).filter(k=>k!=='updatedAt')});});return {saved:true};
   }

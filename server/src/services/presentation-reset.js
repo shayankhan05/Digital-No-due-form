@@ -16,7 +16,8 @@ export async function archiveDemoWorkflow({database,client,actor,manifest,backup
    const records={noDueRequests:[request]};
    for(const [collection,ids]of Object.entries(selected.relatedIds||{})){
     if(!['approvals','notifications','hallTickets','workflowOverrides'].includes(collection)||!Array.isArray(ids))throw Error('Unexpected reset collection.');
-    const rows=await database.collection(collection).find({_id:{$in:ids}},{session}).sort({_id:1}).toArray();
+    // Match the approved planner digest order, rather than Mongo binary collation.
+    const rows=(await database.collection(collection).find({_id:{$in:ids}},{session}).toArray()).sort((a,b)=>String(a._id).localeCompare(String(b._id)));
     if(rows.length!==ids.length||recordDigest(rows)!==selected.relatedDigests[collection]||rows.some(r=>r.requestId!==request._id&&r.__parent!==request._id&&!String(r._id).startsWith(request._id+'/')&&!(collection==='hallTickets'&&r._id===request._id)))throw Error('Associated workflow records changed.');records[collection]=rows;
    }
    const at=new Date();await database.collection('presentationWorkflowArchives').insertOne({_id:archiveId,studentId:user._id,requestId:request._id,actorId:actor.uid,at,backupReference,records,digest:recordDigest(records)},{session});

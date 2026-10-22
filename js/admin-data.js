@@ -3,8 +3,8 @@ import {departmentCode} from './department.js';
 import { db } from "./firebase-config.js";
 import { doc, writeBatch, setDoc, serverTimestamp, arrayRemove } from "./api-store.js";
 import { page, record } from "./academic.js";
-export const ROLES = ["student", "subject_faculty", "mentor", "hod", "office", "library", "physics_lab", "chemistry_lab", "accounts", "admin", "super_admin"];
-export const SERVICES = ["library", "accounts"];
+export const ROLES = ["student", "subject_faculty", "mentor", "hod", "office", "library", "physics_lab", "chemistry_lab", "sports", "accounts", "admin", "super_admin"];
+export const SERVICES = ["library", "accounts", "sports"];
 export function stableId(value) {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(value || "")) throw new Error("IDs must contain 1–128 letters, numbers, hyphens or underscores.");
   return value;
@@ -77,7 +77,7 @@ export async function preparePlan(uid) {
   await requireRole(config.hodId, ["hod"]); await requireRole(config.officeId, ["office"]);
   const items = {}, initialStates = {}, offeringIds = [], teacherIds = [];
   const batch = writeBatch(db);
-  for (const type of SERVICES) {
+  for (const type of [...SERVICES,...(Number(student.semester)<=2?["physics_lab","chemistry_lab"]:[])]) {
     await requireRole(config[type], [type]);
     items[type] = { approverType: type, approverId: config[type], label: type.replaceAll("_", " "), subjectCode: null, offeringId: null };
   }

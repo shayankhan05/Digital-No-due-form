@@ -48,7 +48,7 @@ async function validateAdmin(store,path,data,actor){
     }
   }
   if(/"(password|passwordHash|privateKey)"\s*:/.test(JSON.stringify(data)))throw new Error('Credentials are not application data.');
-  if(collection==='users'&&data.role&&!['super_admin','admin','student','subject_faculty','mentor','hod','office','library','accounts','physics_lab','chemistry_lab'].includes(data.role))throw new Error('Invalid role.');
+  if(collection==='users'&&data.role&&!['super_admin','admin','student','subject_faculty','mentor','hod','office','library','accounts','physics_lab','chemistry_lab','sports'].includes(data.role))throw new Error('Invalid role.');
   if(collection==='students'&&!path.includes('/clearance/')){if(data.mentorId&&!isMentor((await store.doc(`users/${data.mentorId}`).get()).data()))throw new Error('Invalid mentor.');}
   if(collection==='offerings'){const previous=(await store.doc(path).get()).data(),o={...previous,...data};if(isInactive((await store.doc(`users/${o.teacherId}`).get()).data())||!isFaculty((await store.doc(`users/${o.teacherId}`).get()).data())||!(await store.doc(`subjects/${o.subjectId}`).get()).exists)throw new Error('Invalid subject/teacher.');if(!Array.isArray(o.components)||!o.components.length||o.components.length>10||new Set(o.components.map(c=>c.id)).size!==o.components.length||o.components.some(c=>!c.id||!c.label||!Number.isFinite(c.max)||c.max<=0))throw new Error('Invalid assessments.');}
   if(collection==='enrollments'){const s=(await store.doc(`students/${data.studentId}`).get()).data(),o=(await store.doc(`offerings/${data.offeringId}`).get()).data();if(!s||!o||!matchesStudent(s,o)||data.teacherId!==o.teacherId)throw new Error('Invalid enrollment mapping.');}

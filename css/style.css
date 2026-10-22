@@ -1876,3 +1876,10 @@ body.auth-pending #dashboardAuthLoading { display: block; }
 #workflowMonitor article, #workflowMonitor dialog { overflow-wrap: anywhere; }
 dialog.card { width: min(94vw, 520px); max-height: 90vh; overflow-y: auto; box-sizing: border-box; }
 .setup-guide details { margin: 12px 0; }
+
+/* Presentation polish: constrain native confirmation controls without theme changes. */
+.confirmation-row, label:has(> input[type=checkbox]):not(.multi-picker-options label) { display:flex; align-items:center; gap:.5rem; }
+.confirmation-row > input[type=checkbox], label > input[type=checkbox] { width:1rem; height:1rem; flex:0 0 1rem; margin:0; padding:0; }
+.academic-add-button { margin:.35rem 0 .75rem; }
+.academic-add-panel { width:100%; min-width:0; box-sizing:border-box; }
+.academic-add-panel input, .academic-add-panel label { max-width:100%; min-width:0; }

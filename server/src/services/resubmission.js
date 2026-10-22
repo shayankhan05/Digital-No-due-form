@@ -5,7 +5,7 @@ import {resumeChange} from './workflow-model.js';
 export async function prepareResubmission(tx, request, requestId, stamp) {
   const patch = resumeChange(request);
   const keys = Object.keys(request.approvalStates || {}).filter(key => request.approvalStates[key] === 'rejected');
-  const plan = await enrollmentPlan(tx.store, request.studentId);
+  const plan = await enrollmentPlan(tx.store, request.studentId,{existingRequest:request});
   const targets = [];
   const history = [...(request.rejectionHistory || [])];
   for (const key of keys) {

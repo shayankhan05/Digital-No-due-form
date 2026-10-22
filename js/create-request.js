@@ -30,10 +30,10 @@ requireAuth(["student"]).then(async (profile) => {
 
     <p class="section-label">Approval requirements</p>
     <div style="margin-bottom:8px;">${chips}</div>
-    <div class="banner">Your enrolled subject teachers, Library and Accounts approve first, followed by Mentor, HOD and Office. You cannot select or remove approvers.</div>
+    <div class="banner">Your enrolled subject teachers, Library, Accounts and Sports approve first, followed by Mentor, HOD and Office. You cannot select or remove approvers.</div>
 
-    <label style="display:flex; align-items:flex-start; gap:8px; font-size:13px; color:var(--text);">
-      <input type="checkbox" id="confirmCheck" style="width:auto; margin:2px 0 0;" />
+    <label class="confirmation-row" style="font-size:13px; color:var(--text);">
+      <input type="checkbox" id="confirmCheck"  />
       <span>I confirm all assignment copies have been submitted and I'm ready to start the No-Due process.</span>
     </label>
 

@@ -21,6 +21,7 @@ const ROLE_HOME = {
   physics_lab: "approver-dashboard.html",
   chemistry_lab: "approver-dashboard.html",
   accounts: "approver-dashboard.html",
+  sports: "approver-dashboard.html",
   mentor: "mentor-dashboard.html",
   hod: "hod-dashboard.html",
   office: "office-dashboard.html",

@@ -31,5 +31,5 @@ export function mountMultiSelectDropdown(select,label){
  select.addEventListener('invalid',event=>{event.preventDefault();error.textContent='Select at least one '+(select.name==='schemeIds'?'scheme.':'section.');error.hidden=false;summary.setAttribute('aria-invalid','true');details.open=true;summary.focus();});
  select.addEventListener('change',()=>{Array.from(options.querySelectorAll('input')).forEach((input,i)=>input.checked=select.options[i].selected);updateSelection();});
  select.form?.addEventListener('reset',()=>setTimeout(()=>{close();refresh();error.hidden=true;summary.removeAttribute('aria-invalid');},0));
- refresh();return {refresh};
+ refresh();select.multiPicker={refresh};return select.multiPicker;
 }
