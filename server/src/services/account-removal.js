@@ -18,7 +18,7 @@ async function exitIdentity(database,uid,{profile,student,offerings,blockers}){
  for(const e of enrolled){const o=await database.collection('offerings').findOne({_id:e.offeringId});if(!o||o.active===false)continue;const teacher=await database.collection('users').findOne({_id:o.teacherId});subjects.push({offeringId:o._id,code:o.subjectCode||e.subjectCode,subject:o.subjectName,teacherName:teacher?.name||'Not available',teacherEmail:teacher?.email||'',semester:o.semester,section:o.section,scheme:o.scheme});}
  const classes=[];for(const o of offerings)classes.push({id:o._id,subject:o.subjectName,code:o.subjectCode,semester:o.semester,section:o.section,scheme:o.scheme,studentsEnrolled:await database.collection('enrollments').countDocuments({offeringId:o._id,active:true})});
  const request=student?(await database.collection('noDueRequests').find({studentId:uid,status:{$in:pendingStatuses}}).sort({createdAt:-1,_id:-1}).limit(1).next()||await database.collection('noDueRequests').find({studentId:uid}).sort({createdAt:-1,_id:-1}).limit(1).next()):null;
- return {uid,name:profile.name,email:profile.email,phone:student?.phone||profile.phone||'',role:profile.role,scope:profile.scope,departmentId:profile.departmentId,department:student?.department||profile.department,identifier:student?.usn||profile.facultyId,semester:student?.semester,section:student?.section,scheme:student?.scheme,admissionDate:student?.admissionDate||profile.admissionDate||null,mentor:mentor?{name:mentor.name,email:mentor.email}:null,subjects,accountStatus:profile.accountStatus||'active',offerings:classes,blockers,request:request?{id:request._id,status:request.status}:null,hallTickets:student?await database.collection('hallTickets').countDocuments({studentId:uid}):0};
+ return {uid,name:profile.name,email:profile.email,phone:student?.phone||profile.phone||'',role:profile.role,scope:profile.scope,departmentId:profile.departmentId,department:student?.department||profile.department,identifier:student?.usn||profile.facultyId,semester:student?.semester,section:student?.section,scheme:student?.scheme,admissionDate:student?.admissionDate||profile.admissionDate||null,mentor:mentor?{name:mentor.name,email:mentor.email}:null,subjects,accountStatus:profile.accountStatus||'active',exitedAt:profile.exitedAt||profile.removedAt||null,offerings:classes,blockers,request:request?{id:request._id,status:request.status}:null,hallTickets:student?await database.collection('hallTickets').countDocuments({studentId:uid}):0};
 }
 
 // All exit management operations use the same admin-only endpoint/removal service.
@@ -67,18 +67,20 @@ export async function accountExit({database,client,auth,actor,input={},restoreSt
   const quote=value=>'"'+String(value??'').replace(/^[=+@\-\t\r]/,"'$&").replaceAll('"','""')+'"';
   return {filename:`${status}-${input.kind==='student'?'students':'faculty'}.csv`,count:rows.length,csv:'\uFEFF'+[headers,...rows.map(r=>[r.name,r.identifier,r.email,r.phone,departmentLabel(r.department),r.semester,r.section,r.scheme,r.role,r.subjects,r.accountStatus])].map(row=>row.map(quote).join(',')).join('\r\n')+'\r\n'};
  }
- if(action==='restore-exited'){if(administrator.role!=='super_admin'||input.confirmation!=='RESTORE')fail('Only Super Admin may explicitly restore an exited identity with RESTORE confirmation.','permission-denied');return reactivateAccount({database,client,auth,actor,uid:input.uid,confirmation:'REACTIVATE',kind:input.kind,restoreStudent,restoreExited:true});}
+ if(action==='restore-exited'){if(administrator.role!=='super_admin'||input.confirmation!=='RESTORE')fail('Only Super Admin may explicitly restore an exited identity with RESTORE confirmation.','permission-denied');if(typeof input.reason!=='string'||!input.reason.trim()||input.reason.trim().length>1000)fail('A restoration reason is required (maximum 1000 characters).');return reactivateAccount({database,client,auth,actor,uid:input.uid,confirmation:'REACTIVATE',kind:input.kind,restoreStudent,restoreExited:true,restorationReason:input.reason.trim()});}
  if(action==='reactivate')return reactivateAccount({database,client,auth,actor,uid:input.uid,confirmation:input.confirmation,kind:input.kind,restoreStudent});
  fail('Unknown exit management operation.');
 }
 
-async function reactivateAccount({database,client,auth,actor,uid,confirmation,kind,restoreStudent,restoreExited=false}){
+async function reactivateAccount({database,client,auth,actor,uid,confirmation,kind,restoreStudent,restoreExited=false,restorationReason=''}){
  if(typeof uid!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(uid)||confirmation!=='REACTIVATE')fail('Type REACTIVATE to confirm reactivation of the existing identity.');
  let profile,operationId;const session=client.startSession();
  try{await session.withTransaction(async()=>{
   profile=await database.collection('users').findOne({_id:uid},{session});
   if(!profile||(kind==='student'?profile.role!=='student':!facultyRoles.includes(profile.role)))fail('Select an existing matching identity.');
   if(!isInactive(profile))return;
+  if(!restoreExited&&profile.accountStatus==='exited')fail('This identity has left the institution. Explicit restoration is required.');
+  if(restoreExited&&profile.accountStatus!=='exited')fail('Choose an exited identity for institutional restoration.');
   if(profile.accountStatus!=='inactive'&&!(restoreExited&&profile.accountStatus==='exited'))fail('Finish pending deactivation before reactivating this identity.');
   const identity=await auth.getUser(uid);if(identity.email?.toLowerCase()!==profile.email?.toLowerCase())fail('Authentication identity does not match the retained profile.');
   const same=await database.collection('users').find({email:profile.email,_id:{$ne:uid}}).collation({locale:'en',strength:2}).limit(1).toArray();if(same.length)fail('Email conflicts with another institutional identity.');
@@ -97,15 +99,15 @@ async function reactivateAccount({database,client,auth,actor,uid,confirmation,ki
    const ref=tx.store.doc(`users/${uid}`),fresh=(await tx.get(ref)).data();
    if(!isInactive(fresh))return;
    if(fresh.exitOperationId!==operationId||fresh.exitOperation!=='reactivating')fail('Exit operation changed; review and retry.');
-   const fields={accountStatus:'active',authDisabled:false,reactivatedAt:new Date(),reactivatedBy:actor.uid,exitOperation:null,exitOperationId:null};
+   const fields={accountStatus:'active',authDisabled:false,reactivatedAt:new Date(),reactivatedBy:actor.uid,exitOperation:null,exitOperationId:null,...(restoreExited?{restoredAt:new Date(),restoredBy:actor.uid,restorationReason}:{})};
    // Write before the normal mapper reads; all Mongo changes commit together.
    await ref.set(fields,{merge:true});
    if(profile.role==='student'){await tx.store.doc(`students/${uid}`).set(fields,{merge:true});if(restoreExited||!profile.deactivationReason&&profile.removedAt&&!(await tx.store.collection('enrollments').where('studentId','==',uid).where('active','==',true).get()).size)subjectsMapped=await restoreStudent(tx.store,uid);const current=(await tx.store.doc(`students/${uid}`).get()).data();await tx.store.doc(`officeStudentSearch/${uid}`).set(officeSearchDocument(uid,current));}
-   await database.collection('superAdminAudit').updateOne({_id:'reactivate:'+operationId},{$setOnInsert:{action:'ACCOUNT_REACTIVATED',actorUid:actor.uid,target:uid,departmentId:profile.departmentId||null,reason:restoreExited?'Explicit restoration after institutional exit':'Explicit reactivation',operationType:restoreExited?'restore-exited':'reactivate',timestamp:fields.reactivatedAt}},{session:tx.store.session,upsert:true});
-   await database.collection('accountExitEvents').updateOne({_id:'reactivate:'+operationId},{$setOnInsert:{uid,action:'ACCOUNT_REACTIVATED',actorId:actor.uid,departmentId:profile.departmentId||null,reason:'Explicit administrator reactivation',operationType:'reactivate',at:fields.reactivatedAt}},{session:tx.store.session,upsert:true});
+   await database.collection('superAdminAudit').updateOne({_id:(restoreExited?'restore:':'reactivate:')+operationId},{$setOnInsert:{action:restoreExited?'ACCOUNT_IDENTITY_RESTORED':'ACCOUNT_REACTIVATED',actorUid:actor.uid,target:uid,departmentId:profile.departmentId||null,reason:restoreExited?restorationReason:'Explicit reactivation',operationType:restoreExited?'restore-exited':'reactivate',timestamp:fields.reactivatedAt}},{session:tx.store.session,upsert:true});
+   await database.collection('accountExitEvents').updateOne({_id:(restoreExited?'restore:':'reactivate:')+operationId},{$setOnInsert:{uid,action:restoreExited?'ACCOUNT_IDENTITY_RESTORED':'ACCOUNT_REACTIVATED',actorId:actor.uid,departmentId:profile.departmentId||null,reason:restoreExited?restorationReason:'Explicit administrator reactivation',operationType:restoreExited?'restore-exited':'reactivate',at:fields.reactivatedAt}},{session:tx.store.session,upsert:true});
   });
  }catch(error){try{await auth.updateUser(uid,{disabled:true});await auth.revokeRefreshTokens(uid);}catch{/* Mongo remains blocked even when Auth is unavailable. */}fail('Reactivation is incomplete; the institutional account remains blocked. '+error.message,'failed-precondition');}
- return {uid,accountStatus:'active',subjectsMapped,message:'Existing account reactivated. Original UID, password and history preserved. Cancelled requests and archived notifications stay archived.'};
+ return {uid,accountStatus:'active',subjectsMapped,message:restoreExited?'Institutional identity restored successfully.':'Existing account reactivated. Original UID, password and history preserved. Cancelled requests and archived notifications stay archived.'};
 }
 
 export async function accountRemoval({database,client,auth,actor,uid,confirmation,preview=false,institutionalExit=false,reason='',exitType='permanent'}) {
