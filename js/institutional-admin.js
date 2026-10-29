@@ -1,3 +1,4 @@
+import {wirePhoneInput} from './phone.js';
 import {mountInstitutionServices} from './institution-services-ui.js';
 import {mountWorkflowOversight} from './workflow-oversight.js';
 import {mountProvisioningForms} from './provisioning-forms.js';
@@ -32,6 +33,7 @@ async function render() {
   <div class="card"><h2>Manage College Accounts</h2><p>Add and manage student, faculty and staff login accounts.</p><form id="accountForm"><label>Role<select name="role">${ROLES.filter(r=>actor.role==='super_admin'||['student','subject_faculty','mentor'].includes(r)).map(r=>`<option value="${e(r)}">${e(roleLabel(r))}</option>`).join('')}</select></label>${field('name','Name','text',true)}${field('collegeEmail','College email','email',true)}${field('phone','Phone')}${field('department','Department','text',true)}${field('facultyId','Employee / Faculty ID (staff)')}${field('usn','USN (students)')}${field('semester','Semester (students)','number')}${field('section','Section (students)')}${field('scheme','Scheme (students)')}<label>Mentor college email (students)<input name="mentorEmail" type="email" list="mentorOptions"></label><datalist id="mentorOptions"></datalist>${field('mentorEmployeeId','Mentor employee ID (alternative)')}</form><div class="provision-actions"><button type="submit" form="accountForm" id="validateAccountBtn" class="btn-primary">Validate account</button><button type="button" id="provisionBtn" class="btn-primary" disabled>Confirm & create account</button></div><div id="accountPreview"></div><p id="accountStatus" role="status"></p></div>
   ${collegeImportHTML()}
   <div id="exitManagement"></div><div class="card"><h2>Find institutional account</h2><label>Search by<select id="searchField"><option value="email">College email</option><option value="usn">USN</option><option value="facultyId">Employee / Faculty ID</option></select></label><label>Exact value<input id="searchValue"></label><button id="searchBtn" class="btn-sm">Find account</button><div id="searchResults"></div></div>`;
+  wirePhoneInput(document.getElementById('accountForm').elements.phone);
   exitManager=mountExitManagement(document.getElementById('exitManagement'),actor);
   if(actor.role==='super_admin')loadMasters().then(m=>mountInstitutionServices(document.getElementById('policyForm').closest('.card'),m,api)).catch(error=>document.getElementById('policyStatus').textContent=error.message);
   if(document.getElementById('policyForm'))document.getElementById('policyForm').onsubmit=event=>{event.preventDefault();busy(event.target.querySelector('button'),async()=>{

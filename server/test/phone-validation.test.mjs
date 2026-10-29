@@ -1,0 +1,30 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {chromium} from 'playwright';
+import {PHONE_ERROR,phoneError,validPhone} from '../../js/phone.js';
+import {parseCollegeCSV,normalizeCollegeRow} from '../../js/college-csv.js';
+import {createProvisioner} from '../src/services/provisioning.js';
+const invalid=['123456789','12345678901','98765abc10','98765-43210','98765 43210',' 9876543210','9876543210 ','9876543210\n'];
+function fixture(){
+ const records={users:[{_id:'admin',role:'super_admin'},{_id:'mentor',role:'mentor',email:'mentor@demo.test'}],students:[],departments:[],schemes:[],offerings:[]};
+ let writes=0;
+ const snap=(id,data)=>({id,exists:!!data,data:()=>data});
+ const db={snapshot:records,doc(path){const [c,id]=path.split('/');return {get:async()=>snap(id,c==='settings'?{allowedDomains:['demo.test'],departments:['ISE'],sections:['A'],schemes:['2022']}:records[c]?.find(d=>d._id===id)),set:async()=>{writes++;throw Error('Unexpected write');}};},collection(c){let rows=records[c]||[];const q={where(k,op,v){rows=rows.filter(r=>op==='in'?v.includes(r[k]):r[k]===v);return q;},limit(n){rows=rows.slice(0,n);return q;},async get(){const docs=rows.map(r=>snap(r._id,r));return{docs,size:docs.length,empty:!docs.length};}};return q;},runTransaction:async()=>{writes++;throw Error('Unexpected write');}};
+ const auth={getUser:async uid=>({uid,disabled:false}),getUserByEmail:async()=>{throw Object.assign(Error('Absent'),{code:'auth/user-not-found'});},createUser:async()=>{writes++;throw Error('Unexpected Auth write');}};
+ return {service:createProvisioner({db,auth,demo:true}),records,get writes(){return writes;}};
+}
+const base={name:'Phone Test',collegeEmail:'phone@demo.test',phone:'9876543210',department:'ISE',facultyId:'PHONE1',employeeId:'PHONE1',usn:'PHONE001',semester:5,section:'A',scheme:'2022',mentorId:'mentor'};
+test('exact ASCII digit validation and existing optional/required semantics',()=>{
+ assert.equal(validPhone('9876543210'),true);assert.equal(validPhone('0000000000'),true);
+ for(const value of [...invalid,1234567890,{},false])assert.equal(phoneError(value),PHONE_ERROR);
+ assert.equal(phoneError('',true),PHONE_ERROR);assert.equal(phoneError(''), '');assert.equal(phoneError(undefined),'');
+});
+for(const role of ['student','subject_faculty','mentor','admin','hod','office','library','accounts','physics_lab','chemistry_lab','sports']){
+ test(role+' manual preview rejects invalid phones and accepts 10 digits',async()=>{const f=fixture();for(const phone of invalid){const result=await f.service.dispatch('admin',{action:'previewAccounts',rows:[{...base,role,phone}]});assert.equal(result.rows[0].error,PHONE_ERROR);}const result=await f.service.dispatch('admin',{action:'previewAccounts',rows:[{...base,role}]});assert.notEqual(result.rows[0].status,'ERROR',JSON.stringify(result));assert.equal(f.writes,0);});
+ test(role+' direct creation rejects invalid phones before any write',async()=>{const f=fixture(),before=structuredClone(f.records);for(const phone of invalid)await assert.rejects(f.service.dispatch('admin',{action:'provision',row:{...base,role,phone},requestId:'phone-test-operation'}),e=>e.code==='invalid-argument'&&e.message===PHONE_ERROR);assert.deepEqual(f.records,before);assert.equal(f.writes,0);});
+}
+for(const type of ['students','teachers'])test(type+' CSV validates length and nonnumeric input through backend',async()=>{const f=fixture();for(const phone of ['9876543210',...invalid.slice(0,5)]){const header='name,college_email,phone,department_code,employee_id,usn,semester,section,scheme,mentor_employee_id';const row=parseCollegeCSV(header+'\nPhone Test,phone@demo.test,'+phone+',ISE,PHONE1,PHONE001,5,A,2022,MENTOR',type)[0];row.mentorId='mentor';delete row.mentorEmployeeId;const result=await f.service.dispatch('admin',{action:type==='teachers'?'previewTeachers':'previewAccounts',rows:[row]});if(phone==='9876543210')assert.notEqual(result.rows[0].status,'ERROR',JSON.stringify(result));else assert.equal(result.rows[0].error,PHONE_ERROR);}assert.equal(normalizeCollegeRow({phone:' 9876543210'},type).phone,' 9876543210');assert.equal(f.writes,0);});
+test('faculty CSV direct import rejects invalid phones before writes',async()=>{const f=fixture();for(const phone of invalid)await assert.rejects(f.service.dispatch('admin',{action:'importTeacher',row:{...base,role:'subject_faculty',phone}}),e=>e.code==='invalid-argument'&&e.message===PHONE_ERROR);assert.equal(f.writes,0);});
+test('valid phone preserves duplicate email and USN detection',async()=>{for(const field of ['collegeEmail','usn']){const f=fixture(),rows=[{...base,role:'student'},{...base,role:'student',collegeEmail:'second@demo.test',usn:'PHONE002',[field]:base[field]}];const result=await f.service.dispatch('admin',{action:'previewAccounts',rows});assert.ok(result.rows.some(r=>r.duplicate),JSON.stringify(result));assert.equal(f.writes,0);}});
+test('browser input rejects short, long, letters and symbols with exact message',async()=>{const browser=await chromium.launch({headless:true,channel:'chrome'});try{const page=await browser.newPage();await page.setContent('<form><input name="phone"><button>Create</button></form>');const source=await readFile(new URL('../../js/phone.js',import.meta.url),'utf8');await page.addScriptTag({content:source.replaceAll('export ','')+';wirePhoneInput(document.querySelector("input"));'});for(const phone of ['9876543210',...invalid.slice(0,5)]){const result=await page.evaluate(value=>{const input=document.querySelector('input');input.value=value;input.dispatchEvent(new Event('input'));return{valid:input.checkValidity(),message:input.validationMessage,max:input.maxLength};},phone);assert.equal(result.valid,phone==='9876543210');assert.equal(result.message,phone==='9876543210'?'':PHONE_ERROR);assert.equal(result.max,10);}await page.locator('input').fill('');await page.locator('input').pressSequentially('abc-');assert.equal(await page.locator('input').inputValue(),'');}finally{await browser.close();}});

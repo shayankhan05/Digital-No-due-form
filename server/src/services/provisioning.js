@@ -4,6 +4,7 @@ export function allowedCollegeDomains(values,existing={},demo=false){
  if(!domains.length||domains.length>20||domains.some(d=>!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(d)||!demo&&d==='demo.test'&&!existing.allowedDomains?.includes(d)&&!existing.demoStudentProvisioningEnabled&&!existing.demoStaffProvisioningEnabled))throw Object.assign(Error('Configure valid college domains; production cannot add demo.test without an existing demo policy.'),{code:'invalid-argument'});
  return domains;
 }
+import {phoneError} from '../../../js/phone.js';
 import {assertSemester} from '../../../js/semester.js';
 import {isMentor,isFaculty,hasRole} from '../../../js/capabilities.js';
 import {sectionMaster,studentSectionCodes} from './section-master.js';
@@ -61,6 +62,8 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     if(results[0].scope==='department'&&canonicalDepartment(results[0].department)!==row.department)fail('Mentor belongs to another department.');return results[0];
   }
   function normalize(input,p) {
+    const phoneValidation = phoneError(input?.phone);
+    if (phoneValidation) fail(phoneValidation);
     const row={role:'student',...input};
     row.name=text(row.name);row.collegeEmail=email(row.collegeEmail || row.email);row.department=canonicalDepartment(row.department,p.departmentAliases);
     row.scope=['admin','student','subject_faculty','mentor','hod','office'].includes(row.role)?'department':['accounts','sports'].includes(row.role)?'institution':row.scope==='department'?'department':'institution';if(['accounts','sports'].includes(row.role)){row.department='';row.departmentId=null;}if(row.isMentor!==undefined){if(![true,false,'true','false'].includes(row.isMentor))fail('is_mentor must be true or false.');row.isMentor=row.isMentor===true||row.isMentor==='true';if(row.isMentor&&!['subject_faculty','mentor'].includes(row.role))fail('Only faculty can have mentor capability.');}row.phone=text(row.phone);row.scheme=text(row.scheme);row.facultyId=text(row.facultyId || row.employeeId).toUpperCase();

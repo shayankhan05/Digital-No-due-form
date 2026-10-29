@@ -1,3 +1,4 @@
+import {wirePhoneInput} from './phone.js';
 import {SEMESTER_ERROR} from './semester.js';
 import {mountBulkExit} from './bulk-exit-ui.js';
 import {mountPermanentRemoval} from './permanent-removal-ui.js';
@@ -68,6 +69,7 @@ export async function mountLeadership(host,actor,masters,current){
   search.elements.term.oninput=()=>{if(!browse)resetSearch();};
   browseButton.onclick=()=>{if(browse){resetSearch(true);return;}browse=true;allRows=[];submittedTerm='';page=1;browseButton.textContent='Hide eligible faculty';browseButton.setAttribute('aria-expanded','true');load().catch(showError);};
   for(const[key,delta]of [['prev',-1],['next',1]])pager.querySelector('[data-'+key+']').onclick=()=>{page+=delta;load().catch(showError);};
+  wirePhoneInput(f.elements.phone);
   const requestId=crypto.randomUUID();f.onsubmit=ev=>{ev.preventDefault();busy(f.querySelector('[type=submit]'),async()=>{try{const data=Object.fromEntries(new FormData(f)),create=data.uid==='__new__';if(!data.uid)return;await post('/api/administration/leadership',{departmentId:d._id,position,uid:create?undefined:data.uid,newAccount:create?{name:data.name,collegeEmail:data.collegeEmail,facultyId:data.facultyId,phone:data.phone}:undefined,requestId});location.reload();}catch(err){status.textContent=err.message;}});};
   resetSearch();editor.scrollIntoView({block:'center'});
  });
