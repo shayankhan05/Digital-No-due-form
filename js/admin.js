@@ -1,3 +1,4 @@
+import {wirePhoneInput} from './phone.js';
 import {assertSemester} from './semester.js';
 if(!['localhost','127.0.0.1'].includes(location.hostname)||new URLSearchParams(location.search).get('maintenance')!=='1'){location.replace('admin-dashboard.html');throw new Error('Internal maintenance is available only in explicit local maintenance mode.');}
 import {mountAcademicSelects} from './master-controls.js';
@@ -34,6 +35,8 @@ async function render() {
     <div class="card"><h2>Student CSV import</h2><p>Headers: uid,name,usn,email,phone,semester,section,mentorId. Actual Auth UIDs are required.</p><input id="csv" type="file" accept=".csv"><button id="csvPreviewBtn" class="btn-sm">Preview CSV</button><div id="csvPreview"></div><button id="csvSave" class="btn-primary" disabled>Import reviewed students</button></div>
     <div class="card"><h2>Legacy request compatibility</h2><label>Existing request ID<input id="legacyId"></label><button id="legacyBtn" class="btn-sm">Review & upgrade existing request</button><p>Preserves existing approvals and request status. Review mappings before confirming.</p></div>`;
   mountAcademicSelects(document.getElementById('recordForm'),academicMasters);
+  const phoneInput=document.getElementById('recordForm').elements.phone;
+  if(phoneInput)wirePhoneInput(phoneInput);
   document.querySelectorAll(".tab").forEach(b => b.onclick = () => { selected = b.dataset.key; cursor = null; listed = []; render().catch(error => errorState(content,error)); });
   document.getElementById("recordForm").onsubmit = event => { event.preventDefault(); busy(event.target.querySelector("button"), () => save(new FormData(event.target))); };
   document.getElementById("lookupBtn").onclick = event => busy(event.target, async () => { const row = await record(selected, document.getElementById("lookup").value.trim()); if (!row) throw new Error("Record not found."); edit(row); });

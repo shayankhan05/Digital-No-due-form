@@ -1,3 +1,4 @@
+import {phoneError} from '../../../js/phone.js';
 import {assertSemester} from '../../../js/semester.js';
 import {isMentor,isFaculty} from '../../../js/capabilities.js';
 import {assertDepartment,departmentOf} from '../services/department-master.js';
@@ -21,7 +22,12 @@ export async function saveMark(store,actor,id,data){
   });
 }
 async function validateAdmin(store,path,data,actor){
-  const [collection]=path.split('/');const previous=(await store.doc(path).get()).data();if(previous)await assertDepartment(store,actor,collection,previous);if(actor.managementDepartmentId){const candidate={...previous,...data};if(!candidate.departmentId&&candidate.scope!=='institution')candidate.departmentId=await departmentOf(store.database,collection,candidate);await assertDepartment(store,actor,collection,candidate);}
+  const [collection]=path.split('/');
+  if (['users','students'].includes(collection) && Object.hasOwn(data,'phone')) {
+    const error = phoneError(data.phone);
+    if (error) throw Object.assign(new Error(error), {code:'invalid-argument'});
+  }
+  const previous=(await store.doc(path).get()).data();if(previous)await assertDepartment(store,actor,collection,previous);if(actor.managementDepartmentId){const candidate={...previous,...data};if(!candidate.departmentId&&candidate.scope!=='institution')candidate.departmentId=await departmentOf(store.database,collection,candidate);await assertDepartment(store,actor,collection,candidate);}
   if(actor.role==='admin'&&actor.managementDepartmentId&&collection==='users'&&(!['student','subject_faculty','mentor'].includes(data.role||previous?.role)||previous?.scope==='institution'))forbidden();if(path==='settings/institution'||actor.role==='admin'&&collection==='settings'&&path!=='settings/workflow')forbidden();if(collection==='users'&&previous&&['admin','hod','super_admin'].includes(previous.role)&&data.role&&data.role!==previous.role)forbidden();if(collection==='settings'&&actor.managementDepartmentId&&actor.role==='super_admin')throw new Error('Use the department Workflow Setup form.');
   if(collection==='users'&&actor.role!=='super_admin'&&(data.role==='super_admin'||(await store.doc(path).get()).data()?.role==='super_admin'))forbidden();
   if(path==='settings/workflow'&&actor.role==='admin'&&actor.managementDepartmentId){
