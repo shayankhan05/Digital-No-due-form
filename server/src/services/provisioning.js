@@ -17,6 +17,7 @@ import {FieldValue,HttpsError} from './values.js';
 import {matchesStudent,subjectItem,workflowFor,requiredServices} from './clearance.js';
 const roles=['super_admin','admin','student','subject_faculty','mentor','hod','office','library','physics_lab','chemistry_lab','sports','accounts'];
 const text=v=>String(v??'').trim();
+const AUID_CONFLICT='AUID already belongs to another student.';
 const hash=v=>createHash('sha256').update(v).digest('hex');
 const stamp=()=>FieldValue.serverTimestamp();
 const fail=(message,code='invalid-argument')=>{throw new HttpsError(code,message);};
@@ -74,6 +75,9 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     if(!(temporaryAccount(row,p) && domain==='demo.test') && (!p.allowedDomains.includes(domain) || domain==='demo.test')) fail('Email domain is not allowed by institution policy.');
     if(row.scope==='department'&&!p.departments.includes(row.department)) fail('Choose a configured department.');
     if(row.role==='student') {
+      if(row.auid!=null&&typeof row.auid!=='string')fail('AUID must contain letters and numbers only (maximum 40 characters).');
+      row.auid=text(row.auid).toUpperCase();
+      if(row.auid&&!/^[A-Z0-9]{1,40}$/.test(row.auid))fail('AUID must contain letters and numbers only (maximum 40 characters).');
       row.usn=text(row.usn).toUpperCase();row.semester=assertSemester(row.semester);row.section=text(row.section).toUpperCase();
       if(!/^[A-Z0-9-]{4,30}$/.test(row.usn)) fail('A valid USN is required.');
       if(!studentSectionCodes(p,p.departmentRecords.find(d=>d.code===row.department)).includes(row.section)) fail('Choose a configured section.');
@@ -120,6 +124,13 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     p ||= await policy();
     const row=normalize(input,p);
     delete row.existingUid;
+    if(row.role==='student'&&row.auid){
+      const matches=await db.collection('students').where('auid','==',row.auid).limit(2).get();
+      const owner=matches.docs[0]?.data();
+      if(matches.size>1||owner&&(email(owner.email)!==row.collegeEmail||text(owner.usn).toUpperCase()!==row.usn))fail(AUID_CONFLICT,'already-exists');
+      const reserved=(await db.doc('uniqueIdentities/auid_'+hash(row.auid)).get()).data();
+      if(reserved&&reserved.uid!==uid&&reserved.uid!==matches.docs[0]?.id)fail(AUID_CONFLICT,'already-exists');
+    }
     await inactiveIdentity(row);
     // A repeated student CSV repairs mappings for the same institutional identity.
     // It must never adopt an unrelated Auth account or change an existing profile.
@@ -169,6 +180,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     }
     const warnings=[];
     if(row.role==='student') {
+      if(row.existingUid&&row.auid){const previous=(await db.doc('students/'+row.existingUid).get()).data();if(previous?.auid&&previous.auid!==row.auid)fail('This student already has a different AUID.');}
       row.mentorId=(await mentor(row)).uid;
       if(row.existingUid && (await db.doc(`students/${row.existingUid}`).get()).data().mentorId!==row.mentorId)fail('Existing student mentor differs. Use explicit profile editing.','already-exists');
       row.offerings=await matchingOfferings(row);
@@ -179,13 +191,13 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   }
   async function previewAccounts(inputs) {
     if(!Array.isArray(inputs) || inputs.length<1 || inputs.length>100) fail('Preview 1–100 rows per chunk.');
-    const p=await policy(),seen={collegeEmail:new Set(),usn:new Set(),facultyId:new Set()},result=[];
+    const p=await policy(),seen={collegeEmail:new Set(),usn:new Set(),facultyId:new Set(),auid:new Set()},result=[];
     for(let index=0;index<inputs.length;index++) {
       const input=inputs[index];
       try {
         const {row,warnings}=await validate(input,{p});
-        for(const field of [row.role==='student'?'usn':'facultyId','collegeEmail']) {
-          if(seen[field].has(row[field])) fail(`Duplicate ${field} in uploaded rows.`,'already-exists');
+        for(const field of [row.role==='student'?'usn':'facultyId','collegeEmail',...(row.role==='student'&&row.auid?['auid']:[])]) {
+          if(seen[field].has(row[field])) fail(field==='auid'?AUID_CONFLICT:`Duplicate ${field} in uploaded rows.`,'already-exists');
           seen[field].add(row[field]);
         }
         const {offerings,...safe}=row;
@@ -328,9 +340,10 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   async function provision(caller,input,requestId) {
     if(!/^[A-Za-z0-9_-]{8,100}$/.test(text(requestId))) fail('A stable requestId is required for retry safety.');
     const uid=`p_${hash(`${caller}:${requestId}`).slice(0,48)}`,jobRef=db.doc(`provisioningJobs/${uid}`),old=(await jobRef.get()).data();
+    if((await db.doc('superAdminAudit/deleted_account_'+uid).get()).exists)fail('This request ID belongs to a permanently deleted account. Start a new operation.','already-exists');
     const p=await policy();
     const {row,warnings}=await validate(input,{uid:old?uid:null,p});
-    const digest=hash(JSON.stringify({email:row.collegeEmail,role:row.role,usn:row.usn || '',facultyId:row.facultyId,name:row.name,department:row.department,semester:row.semester || '',section:row.section || '',scheme:row.scheme,mentorId:row.mentorId || '',phone:row.phone,...(row.isMentor!==undefined?{isMentor:row.isMentor}:{})}));
+    const digest=hash(JSON.stringify({email:row.collegeEmail,role:row.role,usn:row.usn || '',...(row.role==='student'&&row.auid?{auid:row.auid}:{}),facultyId:row.facultyId,name:row.name,department:row.department,semester:row.semester || '',section:row.section || '',scheme:row.scheme,mentorId:row.mentorId || '',phone:row.phone,...(row.isMentor!==undefined?{isMentor:row.isMentor}:{})}));
     if(old && old.digest!==digest) fail('Retry ID already belongs to another row.','already-exists');
     if(row.existingUid && row.role!=='student') {
       const existingUid=row.existingUid,ref=db.doc(`users/${existingUid}`),keys=[['email',row.collegeEmail],['facultyId',row.facultyId],['loginId',row.facultyId]].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
@@ -353,11 +366,17 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     if(row.existingUid) {
       const student=(await db.doc(`students/${row.existingUid}`).get()).data();
       const existingUid=row.existingUid;
-      const keys=[['email',row.collegeEmail],['usn',row.usn],['loginId',row.usn]].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
+      const keys=[['email',row.collegeEmail],['usn',row.usn],['loginId',row.usn],...(row.auid?[['auid',row.auid]]:[])].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
       await db.runTransaction(async t=>{
         const profile=await t.get(db.doc(`users/${existingUid}`)),current=await t.get(db.doc(`students/${existingUid}`));
         if(isInactive(profile.data())||isInactive(current.data()))fail('Inactive accounts require explicit reactivation.');
         const reservations=await Promise.all(keys.map(ref=>t.get(ref)));
+        if(row.auid&&reservations.at(-1)?.exists&&reservations.at(-1).data().uid!==existingUid)fail(AUID_CONFLICT,'already-exists');
+        if(row.auid&&current.data()?.auid&&current.data().auid!==row.auid)fail('This student already has a different AUID.');
+        if(row.auid&&!current.data()?.auid){
+          t.set(db.doc('students/'+existingUid),{auid:row.auid},{merge:true});
+          t.set(db.doc('superAdminAudit/auid_'+existingUid),{actorUid:caller,studentId:existingUid,action:'STUDENT_AUID_ADDED',auid:row.auid,timestamp:stamp()});
+        }
         if(reservations.some(s=>s.exists&&s.data().uid!==existingUid))fail('Institutional identity reservation conflict.','already-exists');
         reservations.forEach((s,i)=>{if(!s.exists)t.create(keys[i],{uid:existingUid,createdAt:stamp()});});
       });
@@ -373,7 +392,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
       if(accountCreated && temporaryAccount(row,p))await db.doc(`users/${existingUid}`).set({mustChangePassword:true,temporaryPasswordIssuedAt:new Date(Date.now()+1)},{merge:true});
       const subjectsMapped=await mapStudent(existingUid,student,null,{preserveExisting:true});
       const delivery=accountCreated?await activation(existingUid,p):{activation:'unchanged'};
-      return {uid:existingUid,email:row.collegeEmail,accountCreated,authRepaired:accountCreated,academicMappingCreated:subjectsMapped>0,mentorMapped:Boolean(student.mentorId),subjectsMapped,warnings,...delivery};
+      return {uid:existingUid,email:row.collegeEmail,...((row.auid||student.auid)?{auid:row.auid||student.auid}:{}),accountCreated,authRepaired:accountCreated,academicMappingCreated:subjectsMapped>0,mentorMapped:Boolean(student.mentorId),subjectsMapped,warnings,...delivery};
     }
     if(old?.state==='complete') {
       const subjectsMapped=row.role==='student'?await mapStudent(uid,(await db.doc(`students/${uid}`).get()).data()):0;
@@ -382,9 +401,10 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
       return {...result,...(demo&&(await db.doc(`users/${uid}`).get()).data()?.mustChangePassword?{demoPassword:demoTemporaryPassword}:{})};
     }
     const identifier=row.role==='student'?row.usn:row.facultyId;
-    const keys=[['email',row.collegeEmail],[row.role==='student'?'usn':'facultyId',identifier],['loginId',identifier.toUpperCase()]].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
+    const keys=[['email',row.collegeEmail],[row.role==='student'?'usn':'facultyId',identifier],['loginId',identifier.toUpperCase()],...(row.role==='student'&&row.auid?[['auid',row.auid]]:[])].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
     await db.runTransaction(async t=>{
       const snapshots=await Promise.all(keys.map(ref=>t.get(ref)));
+      if(row.role==='student'&&row.auid&&snapshots.at(-1)?.exists&&snapshots.at(-1).data().uid!==uid)fail(AUID_CONFLICT,'already-exists');
       if(snapshots.some(s=>s.exists && s.data().uid!==uid)) fail('Duplicate institutional identity.','already-exists');
       for(const ref of keys) t.set(ref,{uid,createdAt:stamp()},{merge:true});
       t.set(jobRef,{caller,digest,state:'reserved',email:row.collegeEmail,role:row.role,facultyId:row.facultyId,updatedAt:stamp()},{merge:true});
@@ -413,11 +433,12 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     const profile={...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,email:row.collegeEmail,phone:row.phone,...(row.departmentId?{departmentId:row.departmentId}:{}),...(row.strictDepartmentScope?{strictDepartmentScope:true}:{}),department:row.department,scope:row.scope,facultyId:row.facultyId,role:row.role,scheme:row.scheme,updatedAt:stamp(),...(temporaryAccount(row,p)&&!previousProfile?{mustChangePassword:true,temporaryPasswordIssuedAt:new Date(Date.now()+1)}: {})};
     const batch=db.batch(row.role==='student'?[{path:`users/${row.mentorId}`,capability:'mentor'}]:[]);batch.set(db.doc(`users/${uid}`),profile,{merge:true});
     const {mustChangePassword,temporaryPasswordIssuedAt,...studentFields}=profile;
-    if(row.role==='student') batch.set(db.doc(`students/${uid}`),{uid,...studentFields,usn:row.usn,semester:row.semester,section:row.section,mentorId:row.mentorId},{merge:true});
+    if(row.role==='student') batch.set(db.doc(`students/${uid}`),{uid,...studentFields,usn:row.usn,...(row.auid?{auid:row.auid}:{}),semester:row.semester,section:row.section,mentorId:row.mentorId},{merge:true});
+    if(row.role==='student'&&row.auid)batch.set(db.doc('superAdminAudit/auid_'+uid),{actorUid:caller,studentId:uid,action:'STUDENT_CREATED_WITH_AUID',auid:row.auid,timestamp:stamp()});
     await batch.commit();
     const subjectsMapped=row.role==='student'?await mapStudent(uid,{...profile,...row}):0;
     const delivery=await activation(uid,p);
-    const result={uid,name:row.name,usn:row.usn || '',email:row.collegeEmail,section:row.section || '',role:row.role,accountCreated:true,academicMappingCreated:row.role==='student' && subjectsMapped>0,mentorMapped:row.role==='student',subjectsMapped,warnings,...delivery};
+    const result={uid,name:row.name,usn:row.usn || '',...(row.auid?{auid:row.auid}:{}),email:row.collegeEmail,section:row.section || '',role:row.role,accountCreated:true,academicMappingCreated:row.role==='student' && subjectsMapped>0,mentorMapped:row.role==='student',subjectsMapped,warnings,...delivery};
     const {demoPassword,...storedResult}=result;
     await jobRef.set({state:'complete',result:storedResult,updatedAt:stamp()},{merge:true});
     return result;
@@ -566,9 +587,9 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
         return activation(data.uid,await policy());
       }
       case 'directory': {
-        if(!['email','facultyId','usn'].includes(data.field)) fail('Search by email, employee ID or USN.');
-        const collection=data.field==='usn'?'students':'users';
-        const value=data.field==='email'?email(data.value):data.field==='usn'?text(data.value).toUpperCase():text(data.value);
+        if(!['email','facultyId','usn','auid'].includes(data.field)) fail('Search by email, employee ID, USN or AUID.');
+        const collection=['usn','auid'].includes(data.field)?'students':'users';
+        const value=data.field==='email'?email(data.value):['usn','auid'].includes(data.field)?text(data.value).toUpperCase():text(data.value);
         const result=await db.collection(collection).where(data.field,'==',value).limit(20).get();return {rows:result.docs.map(d=>({...d.data(),updatedAt:null,uid:d.id}))};
       }
       default:fail('Unknown operation.');

@@ -30,13 +30,14 @@ export async function workflowFor(db,student){
 export async function enrollmentPlan(db,uid,{existingRequest=null}={}) {
   const student=(await db.doc(`students/${uid}`).get()).data(),config=await workflowFor(db,student);
   if(!student || !config) throw new Error('Student profile and workflow assignments are required.');
-  const enrolled=await db.collection('enrollments').where('studentId','==',uid).where('active','==',true).get();
+  const enrolled=await db.collection('enrollments').where('studentId','==',uid).get();
   const items={};
   for(const row of enrolled.docs) {
     const e=row.data(),snap=await db.doc(`offerings/${e.offeringId}`).get(),o={...snap.data(),id:snap.id};
-    if(!snap.exists || !matchesStudent(student,o)) continue;
+    if(e.teacherNeedsAttention&&snap.exists&&!o.teacherId)throw new Error('An enrolled class has no assigned teacher. Contact the administrator.');
+    if(e.active!==true||!snap.exists || !matchesStudent(student,o)) continue;
     const teacher=(await db.doc(`users/${o.teacherId}`).get()).data();
-    if(!teacher || !isFaculty(teacher) || e.teacherId!==o.teacherId) throw new Error('An enrolled subject has an invalid teacher mapping. Ask the administrator to refresh it.');
+    if(!teacher || isInactive(teacher) || !isFaculty(teacher) || e.teacherId!==o.teacherId) throw new Error('An enrolled subject has an invalid teacher mapping. Ask the administrator to refresh it.');
     const identity=[String(o.subjectCode).trim().toUpperCase(),o.teacherId,Number(o.semester),text(o.section).toUpperCase(),department(o.department||student.department),text(o.scheme||student.scheme)].join('|');
     if(Object.values(items).some(i=>i.subjectIdentity===identity))continue;
     items[`subject_${o.id}`]={...subjectItem(uid,student,o,teacher),subjectIdentity:identity,enrollmentId:row.id};
@@ -80,15 +81,30 @@ export function migrateRequest(r,plan,projections={}) {
     workflowHistory:{approvalItems:oldItems,approvalStates:oldStates,approvals:projections,status:r.status,remaining:r.remaining ?? null,
       mentorApproval:r.mentorApproval || null,hodApproval:r.hodApproval || null,lastEvent:r.lastEvent || null,previousSchemaVersion:r.schemaVersion || 0}}};
 }
+export async function guardPlanOwners(tx,plan){
+  for(const uid of new Set([...plan.approverIds,plan.mentorId,plan.hodId,plan.officeId])){
+    const ref=tx.store.doc('users/'+uid),owner=(await tx.get(ref)).data();
+    if(!owner||isInactive(owner))throw new Error('An assigned approver is no longer available. Refresh academic mappings.');
+    if(['subject_faculty','mentor','hod'].includes(owner.role))tx.update(ref,{accountMappingRevision:(owner.accountMappingRevision||0)+1});
+  }
+}
 export async function syncStudentWorkflow(db,uid) {
   const plan=await enrollmentPlan(db,uid);
-  await db.doc(`students/${uid}/clearance/plan`).set({...plan,updatedAt:FieldValue.serverTimestamp()});
+  await db.runTransaction(async tx=>{
+    const ref=tx.store.doc('students/'+uid),student=(await tx.get(ref)).data();
+    if(!student||isInactive(student))throw new Error('Student account is unavailable.');
+    await guardPlanOwners(tx,plan);
+    tx.update(ref,{requestRevision:(student.requestRevision||0)+1});
+    tx.set(tx.store.doc('students/'+uid+'/clearance/plan'),{...plan,updatedAt:FieldValue.serverTimestamp()});
+  });
   const requests=await db.collection('noDueRequests').where('studentId','==',uid).get();let migrated=0;
   for(const row of requests.docs) {
     await db.runTransaction(async tx=>{
       const fresh=await tx.get(row.ref),approvals=await tx.get(row.ref.collection('approvals'));
+      if(!fresh.exists)return;
       const old=Object.fromEntries(approvals.docs.map(d=>[d.id,d.data()])),change=migrateRequest(fresh.data(),plan,old);
       if(!change) return;
+      await guardPlanOwners(tx,plan);
       tx.update(row.ref,change.patch);
       for(const [id,item] of Object.entries(plan.items)) {
         const previous=old[change.sources[id]],existing=old[id];

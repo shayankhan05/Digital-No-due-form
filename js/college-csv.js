@@ -1,6 +1,6 @@
 import {parseCSV} from './csv.js';
-const aliases={college_email:'collegeEmail',department_code:'department',employee_id:'employeeId',faculty_employee_id:'employeeId',is_mentor:'isMentor',mentor_employee_id:'mentorEmployeeId',mentor_email:'mentorEmail',subject_code:'subjectCode',subject_name:'subjectName',teacher_email:'teacherEmail'};
-const fields=new Set(['name','usn','collegeEmail','email','phone','department','semester','section','scheme','mentorEmployeeId','mentorEmail','mentorId','employeeId','facultyId','role','isMentor','subjectCode','subjectName','teacherEmail','credits','components','active']);
+const aliases={AUID:'auid',college_email:'collegeEmail',department_code:'department',employee_id:'employeeId',faculty_employee_id:'employeeId',is_mentor:'isMentor',mentor_employee_id:'mentorEmployeeId',mentor_email:'mentorEmail',subject_code:'subjectCode',subject_name:'subjectName',teacher_email:'teacherEmail'};
+const fields=new Set(['name','usn','auid','collegeEmail','email','phone','department','semester','section','scheme','mentorEmployeeId','mentorEmail','mentorId','employeeId','facultyId','role','isMentor','subjectCode','subjectName','teacherEmail','credits','components','active']);
 export const defaultComponents=[{id:'ia1',label:'IA1',max:30},{id:'ia2',label:'IA2',max:30},{id:'assignment',label:'Assignment',max:10}];
 export function normalizeCollegeRow(raw,type){
  const row={};for(const[key,value]of Object.entries(raw)){const field=aliases[key]||key;if(!fields.has(field))throw new Error('Unknown CSV header: '+key);if(field in row)throw new Error('Duplicate CSV columns resolve to '+field);row[field]=typeof value==='string'&&field!=='phone'?value.trim():value;}

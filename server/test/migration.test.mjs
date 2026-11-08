@@ -25,6 +25,8 @@ import {chromium} from 'playwright';
 import request from 'supertest';
 import {readFile,mkdir} from 'node:fs/promises';
 import {parseCSV} from '../../js/csv.js';
+import {parseCollegeCSV} from '../../js/college-csv.js';
+import {profileHTML} from '../../js/ui.js';
 import {enrollmentPlan} from '../src/services/clearance.js';
 import {repairDemoPasswordFlags,readEmulatorAuthMetadata} from '../src/services/demo-password-policy.js';
 import {accountRemoval,accountExit} from '../src/services/account-removal.js';
@@ -1144,4 +1146,92 @@ test('parallel section workers reuse only the exact scoped canonical subject cre
  assert.equal((await subjectRow(database,row)).id,subject._id);
  for(const change of [{departmentId:'another-department'},{departmentId:undefined},{scheme:'2025'},{code:'OTHER'},{name:'Conflicting name'},{semester:7}]){concurrent={...subject,...change};await assert.rejects(subjectRow(database,row),/legacy\/unscoped/);}
  concurrent=null;assert.equal((await subjectRow(database,row)).id,subject._id);
+});
+
+test('AUID optional, normalized, uniquely reserved, searchable and audited',async()=>{
+ const row={role:'student',name:'AUID Fixture',collegeEmail:'auid-fixture@demo.test',phone:'9876543210',department:'ISE',usn:'AUID001',semester:5,section:'A',scheme:'2022',mentorEmail:accounts.mentor.email};
+ const {uid}=await admin({action:'provision',row,requestId:'auid-fixture-create'});
+ assert.equal((await database.collection('students').findOne({_id:uid})).auid,undefined);
+ const add=await admin({action:'provision',row:{...row,auid:' ait24beis109 '},requestId:'auid-fixture-add'});
+ assert.equal(add.uid,uid);assert.equal((await database.collection('students').findOne({_id:uid})).auid,'AIT24BEIS109');
+ assert.ok(await database.collection('superAdminAudit').findOne({studentId:uid,action:'STUDENT_AUID_ADDED'}));
+ const search=await admin({action:'directory',field:'auid',value:'ait24beis109'});assert.equal(search.rows[0].uid,uid);
+ const other={...row,auid:'ait24beis109',usn:'AUID002',collegeEmail:'auid-other@demo.test'};
+ const preview=await admin({action:'previewAccounts',rows:[other]});assert.equal(preview.rows[0].error,'AUID already belongs to another student.');
+ const denied=await api('admin','/api/admin',{action:'provision',row:other,requestId:'auid-duplicate-create'});assert.equal(denied.status,409);
+ await assert.rejects(auth.getUserByEmail(other.collegeEmail),{code:'auth/user-not-found'});
+ const create=await admin({action:'provision',row:{...other,auid:'AIT24BEIS110'},requestId:'auid-unique-create'});assert.equal(create.auid,'AIT24BEIS110');
+});
+
+test('cascade removes a mapped student and preserves shared class records',async()=>{
+ const {uid}=await admin({action:'provision',row:{role:'student',name:'Cascade Student',collegeEmail:'cascade-student@demo.test',phone:'9876543210',department:'ISE',usn:'CASCADE001',auid:'CASCADEAUID1',semester:5,section:'A',scheme:'2022',mentorEmail:accounts.mentor.email},requestId:'cascade-student-create'});
+ const teacher=accounts.subject_faculty.uid;
+ await database.collection('subjects').insertOne({_id:'cascade-subject',code:'CASCADE'});
+ await database.collection('offerings').insertOne({_id:'cascade-class',subjectId:'cascade-subject',teacherId:teacher,section:'A',active:true});
+ await database.collection('enrollments').insertOne({_id:'cascade-enrollment',studentId:uid,offeringId:'cascade-class',teacherId:teacher});
+ await database.collection('marks').insertOne({_id:'cascade-enrollment',studentId:uid,offeringId:'cascade-class',teacherId:teacher,scores:{ia1:24}});
+ await database.collection('noDueRequests').insertOne({_id:'cascade-request',studentId:uid,status:'pending_stage1'});
+ await database.collection('approvals').insertOne({_id:'cascade-request/a',__parent:'cascade-request',requestId:'cascade-request',studentId:uid,status:'pending'});
+ await database.collection('notifications').insertOne({_id:'cascade-notification',__parent:uid,requestId:'cascade-request'});
+ const accountIds=[uid],endpoint='/api/admin/accounts/cascade-';
+ assert.equal((await api('admin',endpoint+'preflight',{accountIds})).status,403);
+ const preview=await api('super_admin',endpoint+'preflight',{accountIds});assert.equal(preview.status,200,JSON.stringify(preview.body));assert.deepEqual(preview.body.blocked,[]);
+ assert.equal(preview.body.counts['remove enrollments'],await database.collection('enrollments').countDocuments({studentId:uid}));assert.equal(preview.body.counts['remove approvals'],1);
+ const input={accountIds,fingerprint:preview.body.fingerprint,confirmation:true,typed:'DELETE',reason:'Isolated student cascade test',requestId:'cascade-delete-student'};
+ assert.equal((await api('super_admin',endpoint+'delete',{...input,typed:'NO'})).status,400);
+ const result=await api('super_admin',endpoint+'delete',input);assert.equal(result.status,200,JSON.stringify(result.body));
+ for(const name of ['users','students','clearancePlans','officeStudentSearch'])assert.equal(await database.collection(name).findOne({_id:uid}),null,name);
+ for(const name of ['enrollments','marks','noDueRequests','approvals','notifications','hallTickets'])assert.equal(await database.collection(name).findOne({$or:[{studentId:uid},{__parent:uid},{requestId:'cascade-request'}]}),null,name);
+ assert.equal(await database.collection('uniqueIdentities').countDocuments({uid}),0);
+ assert.ok(await database.collection('offerings').findOne({_id:'cascade-class'}));assert.ok(await database.collection('subjects').findOne({_id:'cascade-subject'}));assert.ok(await database.collection('users').findOne({_id:teacher}));
+ await assert.rejects(auth.getUser(uid),{code:'auth/user-not-found'});
+ assert.equal((await api('super_admin',endpoint+'delete',input)).body.deleted,1);
+ const replay=await api('admin','/api/admin',{action:'provision',row:{role:'student',name:'Cascade Student',collegeEmail:'cascade-student@demo.test',phone:'9876543210',department:'ISE',usn:'CASCADE001',auid:'CASCADEAUID1',semester:5,section:'A',scheme:'2022',mentorEmail:accounts.mentor.email},requestId:'cascade-student-create'});assert.equal(replay.status,409);
+});
+test('cascade detaches faculty teaching, mentoring and section leadership',async()=>{
+ const {uid}=await admin({action:'importTeacher',row:{role:'subject_faculty',name:'Cascade Faculty',collegeEmail:'cascade-faculty@demo.test',phone:'9876543210',department:'ISE',employeeId:'CASCADE-FAC',isMentor:true}});
+ const mentee='cascade-mentee';await database.collection('students').insertOne({_id:mentee,mentorId:uid,teacherIds:[uid],section:'A'});
+ await database.collection('offerings').insertOne({_id:'cascade-faculty-class',teacherId:uid,subjectCode:'CASCADE101',section:'A',active:true});
+ await database.collection('sectionDetails').insertOne({_id:'cascade-section',classTeacherId:uid,section:'A'});
+ await database.collection('enrollments').insertOne({_id:'cascade-faculty-enrollment',studentId:mentee,teacherId:uid,mentorId:uid,offeringId:'cascade-faculty-class',active:true});
+ await database.collection('noDueRequests').insertOne({_id:'cascade-faculty-request',studentId:mentee,mentorId:uid,status:'pending_mentor',approvalItems:{},approvalStates:{},createdAt:new Date()});
+ await database.collection('approvals').insertOne({_id:'cascade-faculty-request/a',__parent:'cascade-faculty-request',requestId:'cascade-faculty-request',studentId:mentee,status:'pending'});
+ await database.collection('notifications').insertOne({_id:'cascade-faculty-notice',__parent:mentee,requestId:'cascade-faculty-request'});
+ const accountIds=[uid],endpoint='/api/admin/accounts/cascade-';
+ const preview=await api('super_admin',endpoint+'preflight',{accountIds});assert.equal(preview.status,200,JSON.stringify(preview.body));assert.deepEqual(preview.body.blocked,[]);assert.equal(preview.body.counts['detach offerings'],1);
+ const input={accountIds,fingerprint:preview.body.fingerprint,confirmation:true,typed:'DELETE',reason:'Isolated faculty cascade test',requestId:'cascade-delete-faculty'};
+ await database.collection('offerings').updateOne({_id:'cascade-faculty-class'},{$set:{subjectCode:'CASCADE102'}});
+ assert.equal((await api('super_admin',endpoint+'delete',input)).status,400);
+ const refreshed=await api('super_admin',endpoint+'preflight',{accountIds});
+ const finalInput={...input,fingerprint:refreshed.body.fingerprint},removeAuth=auth.deleteUser.bind(auth);
+ auth.deleteUser=async()=>{throw Error('Simulated Auth interruption');};
+ try{assert.equal((await api('super_admin',endpoint+'delete',finalInput)).status,400);}finally{auth.deleteUser=removeAuth;}
+ assert.equal((await database.collection('users').findOne({_id:uid})).accountStatus,'deleting');
+ assert.equal((await api('super_admin',endpoint+'preflight',{accountIds})).body.resumeRequestId,input.requestId);
+ const deleted=await api('super_admin',endpoint+'delete',finalInput);assert.equal(deleted.status,200,JSON.stringify(deleted.body));
+ assert.equal(await database.collection('users').findOne({_id:uid}),null);
+ assert.equal((await database.collection('students').findOne({_id:mentee})).mentorId,'');
+ assert.equal((await database.collection('offerings').findOne({_id:'cascade-faculty-class'})).teacherId,'');
+ assert.equal((await database.collection('sectionDetails').findOne({_id:'cascade-section'})).classTeacherId,null);
+ assert.ok(await database.collection('superAdminAudit').findOne({_id:'deleted_account_'+uid}));
+ assert.equal((await database.collection('noDueRequests').findOne({_id:'cascade-faculty-request'})).status,'cancelled');
+ assert.equal((await database.collection('approvals').findOne({_id:'cascade-faculty-request/a'})).status,'cancelled');
+ assert.equal((await database.collection('notifications').findOne({_id:'cascade-faculty-notice'})).archived,true);
+ assert.equal((await api('super_admin','/api/oversight/requests/cascade-faculty-request/override',{approvalId:'mentor',decision:'rejected',version:0,requestKey:'cascade-stale-override',confirmation:true,reason:'Must stay read-only'})).status,400);
+ await assert.rejects(auth.getUser(uid),{code:'auth/user-not-found'});
+});
+
+test('student CSV accepts optional AUID and rejects case-folded duplicates before confirm',async()=>{
+ const common={name:'AUID CSV',department:'ISE',semester:5,section:'A',scheme:'2022',mentorEmail:accounts.mentor.email,phone:'9876543210'};
+ const old={...common,usn:'CSV-AUID-OLD',collegeEmail:'auid-csv-old@demo.test'},modern={...common,usn:'CSV-AUID-NEW',collegeEmail:'auid-csv-new@demo.test',AUID:' ait25beis101 '};
+ const preview=(rows,requestId)=>api('super_admin','/api/college-import/preview',{type:'students',rows,requestId});
+ const duplicate=await preview([parseCollegeCSV(csvOf([modern]),'students')[0],{...old,auid:'AIT25BEIS101'}],'auid-csv-duplicate');
+ assert.equal(duplicate.status,200,JSON.stringify(duplicate.body));assert.equal(duplicate.body.errors,2);assert.equal(duplicate.body.jobId,null);
+ for(const [row,expected,id] of [[old,undefined,'auid-csv-legacy'],[modern,'AIT25BEIS101','auid-csv-modern']]){
+   const validated=await preview(parseCollegeCSV(csvOf([row]),'students'),id);assert.equal(validated.body.errors,0,JSON.stringify(validated.body));
+   const result=await api('super_admin','/api/college-import/confirm',{jobId:validated.body.jobId,confirmation:true});
+   assert.equal(result.body.errors,0,JSON.stringify(result.body));
+   const student=await database.collection('students').findOne({_id:result.body.results[0].uid});
+   assert.equal(student.auid,expected);assert.match(profileHTML(student),new RegExp(expected||'Not provided'));
+ }
 });

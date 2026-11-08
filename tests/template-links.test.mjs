@@ -4,13 +4,17 @@ import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {parseCSV} from '../js/csv.js';
+import {collegeImportHTML,collegeImportFormats,collegeTemplate} from '../js/college-import-formats.js';
+import {parseCollegeCSV} from '../js/college-csv.js';
 const names=['student-import','teacher-import','offering-import','ise-5c-2022-confirmed'];
-test('all four admin template links name existing real CSV files',async()=>{
-  const source=await readFile(new URL('../js/institutional-admin.js',import.meta.url),'utf8');
-  for(const name of names){assert.ok(source.includes(`href="templates/${name}.csv" download="${name}.csv"`));assert.ok((await readFile(new URL(`../templates/${name}.csv`,import.meta.url),'utf8')).trim());assert.ok(!source.includes(`templates/${name}.csv.txt`));}
+test('current admin template links point to real CSV files and the generated student template includes AUID',async()=>{
+  const html=collegeImportHTML();
+  for(const {file} of Object.values(collegeImportFormats)){assert.ok(html.includes('href="templates/'+file+'" download="'+file+'"'));assert.ok((await readFile(new URL('../templates/'+file,import.meta.url),'utf8')).trim());}
+  const generated=parseCollegeCSV(collegeTemplate('students'),'students');
+  assert.equal(generated[0].auid,'');assert.equal(generated[0].name,'Student Name');
 });
 test('template headers and five teacher-offering rows match the current parser and assessment format',async()=>{
-  const headers={student:'name,usn,collegeEmail,phone,department,semester,section,scheme,mentorEmail',teacher:'name,collegeEmail,phone,department,employeeId,role',offering:'department,scheme,semester,section,subjectCode,subjectName,teacherEmail,credits,components'};
+  const headers={student:'name,usn,auid,collegeEmail,phone,department,semester,section,scheme,mentorEmail',teacher:'name,collegeEmail,phone,department,employeeId,role',offering:'department,scheme,semester,section,subjectCode,subjectName,teacherEmail,credits,components'};
   for(const [type,header] of Object.entries(headers))assert.equal((await readFile(new URL(`../templates/${type}-import.csv`,import.meta.url),'utf8')).trim(),header);
   const rows=parseCSV(await readFile(new URL('../templates/demo-teacher-offerings.csv',import.meta.url),'utf8'),headers.offering.split(','));assert.equal(rows.length,5);
   assert.deepEqual(rows.map(r=>r.teacherEmail),['aarav.mehta@demo.test','nida.farooq@demo.test','rohit.kulkarni@demo.test','sana.mir@demo.test','vivek.reddy@demo.test']);

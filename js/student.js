@@ -558,6 +558,7 @@ function showProfile() {
             ${escapeHtml(student.usn || "-")}
           </span>
         </div>
+        <div class="profile-info-row"><span class="profile-info-label">AUID</span><span class="profile-info-value">${escapeHtml(student.auid || "Not provided")}</span></div>
 
 
         <div class="profile-info-row">

@@ -21,8 +21,10 @@ Confirmation uses at most three provisioning workers and checkpoints each row. A
 Student (`templates/college-student-import.csv`):
 
 ```csv
-usn,name,college_email,phone,department_code,semester,section,scheme,mentor_employee_id
+usn,auid,name,college_email,phone,department_code,semester,section,scheme,mentor_employee_id
 ```
+
+AUID is optional. Old files without the column still work. A supplied AUID is trimmed, normalized to uppercase, and reserved to the same student UID across departments. An existing student with no AUID can receive one by reimporting their matching USN and email. A conflicting AUID blocks preview and creation. The selected department can supply the department when the column is omitted.
 
 Faculty (`templates/faculty-import.csv`):
 
@@ -57,3 +59,9 @@ GET deduplication lasts only while a request is running. Page-initialization mas
 Run `npm test` from `server/`. Tests use loopback Auth in `demo-mongo-audit` and disposable in-memory Mongo databases. They perform real Chrome CSV imports at 200 students/30 faculty/7 faculty mentors and API stress tests at 500 students/50 faculty, plus scope, error, repeat-import, removal and workflow checks. Never point this harness at production.
 
 The operator script `server/scripts/audit-institutional-identities.mjs` is read-only by default. It requires explicit local URI/credential paths and output directory. `--apply` makes a verified full backup first and only adds missing, nonconflicting identity reservations. It does not repair incomplete historical fixture profiles by inventing identities or deleting history.
+
+## Single-account cascade deletion
+
+Super Admin can open **Hard Delete** from an account review or the directory. For a mapped account, choose **Review Cascade Delete**, review the dependency counts and warnings, provide a reason, check the acknowledgment and type `DELETE`. Unrecognized references and protected leadership accounts block deletion. Bulk Hard Delete remains limited to its existing eligibility rules.
+
+Institutional Exit disables login and preserves the identity and academic history. Cascade deletion removes the identity and its owned records; shared classes and subjects remain. A faculty member’s classes may require a replacement teacher, their mentees a replacement mentor, and affected clearance requests may have to be submitted again. If Firebase removal is interrupted, reopen the same review to resume the journaled operation.
