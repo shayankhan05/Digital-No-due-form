@@ -1196,6 +1196,13 @@ test('cascade removes a mapped student and preserves shared class records',async
  try{
   await page.evaluate(async uid=>{const {mountPermanentRemoval}=await import('/js/permanent-removal-ui.js');const host=document.createElement('div');document.body.append(host);mountPermanentRemoval(host,()=>[uid],async()=>{},{single:true,buttonId:'cascade-test-review'});},uid);
   await page.locator('#cascade-test-review').click();
+  const eligibility=page.locator('dialog.delete-review-eligibility');await eligibility.waitFor();
+  assert.deepEqual(await eligibility.locator('th').allTextContents(),['Account','Classification','Reason']);
+  assert.match(await eligibility.locator('tbody td').first().innerText(),/Cascade Student[\s\S]*cascade-student@demo.test/);
+  for(const width of [1366,390]){
+   await page.setViewportSize({width,height:850});
+   assert.equal(await eligibility.evaluate(el=>{const headers=[...el.querySelectorAll('th')],cells=[...el.querySelectorAll('tbody tr:first-child td')];return headers.every((h,i)=>Math.abs(h.getBoundingClientRect().left-cells[i].getBoundingClientRect().left)<1)&&el.scrollWidth<=el.clientWidth+1;}),true);
+  }
   await page.getByRole('button',{name:'Review Cascade Delete'}).click();
   const dialog=page.locator('dialog[open]');
   await dialog.getByText('Archived workflow history kept: 1',{exact:true}).waitFor();
