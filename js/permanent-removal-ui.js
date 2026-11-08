@@ -17,14 +17,25 @@ function dependencyLabel(key){
 async function reviewCascade(uid,refresh){
  const preview=await post('/api/admin/accounts/cascade-preflight',{accountIds:[uid]});
  const dialog=document.createElement('dialog');dialog.className='card';
- dialog.innerHTML=`<h2>Review Cascade Delete</h2><dl class="cascade-identity"><dt>Name</dt><dd>${e(preview.name||'Not provided')}</dd>${preview.usn?`<dt>USN</dt><dd>${e(preview.usn)}</dd>`:preview.facultyId?`<dt>Employee ID</dt><dd>${e(preview.facultyId)}</dd>`:''}<dt>Email</dt><dd>${e(preview.email||'Not provided')}</dd></dl><p>Deleting this account will also remove or detach the following dependent records.</p><p>Permanent Institutional Exit disables login and preserves the account's institutional history. Cascade Delete removes the account and its operational mappings.</p><ul>${Object.entries(preview.counts).filter(([,n])=>n).map(([label,n])=>`<li>${e(dependencyLabel(label))}: ${n}</li>`).join('')}</ul>${preview.warnings.map(w=>`<p>${e(w)}</p>`).join('')}${preview.blocked.length?`<p role="alert">Unresolved dependencies: ${e(preview.blocked.join(', '))}. No deletion is available.</p>`:''}<form><label>Reason<textarea name="reason" required maxlength="1000"></textarea></label><label>Type DELETE<input name="typed" required pattern="DELETE" autocomplete="off"></label><label class="confirmation-row"><input name="confirmation" type="checkbox" required> I understand that this account and its mapped operational records will be permanently deleted and this action cannot be undone.</label><div class="provision-actions"><button type="submit" class="btn-primary" ${preview.blocked.length?'disabled':''}>Permanently Delete Account</button><button type="button" class="btn-sm" data-close>Close</button></div><p role="status"></p></form>`;
+ dialog.innerHTML=`<h2>Review Cascade Delete</h2><dl class="cascade-identity"><dt>Name</dt><dd>${e(preview.name||'Not provided')}</dd>${preview.usn?`<dt>USN</dt><dd>${e(preview.usn)}</dd>`:preview.facultyId?`<dt>Employee ID</dt><dd>${e(preview.facultyId)}</dd>`:''}<dt>Email</dt><dd>${e(preview.email||'Not provided')}</dd></dl><p>Deleting this account will also remove or detach the following dependent records.</p><p>Permanent Institutional Exit disables login and preserves the account's institutional history. Cascade Delete removes the account and its operational mappings.</p><ul>${Object.entries(preview.counts).filter(([,n])=>n).map(([label,n])=>`<li>${e(dependencyLabel(label))}: ${n}</li>`).join('')}</ul>${preview.warnings.map(w=>`<p>${e(w)}</p>`).join('')}${preview.blocked.length?`<p role="alert">Unresolved dependencies: ${e(preview.blocked.join(', '))}. No deletion is available.</p>`:''}<form><label>Reason<textarea name="reason" required maxlength="1000"></textarea></label><label class="confirmation-row"><input name="confirmation" type="checkbox" required> I understand that this account and its mapped operational records will be permanently deleted and this action cannot be undone.</label><div class="provision-actions"><button type="submit" class="btn-primary" disabled>Permanently Delete Account</button><button type="button" class="btn-sm" data-close>Close</button></div><p role="status"></p></form>`;
  document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.querySelector('[data-close]').onclick=()=>dialog.close();
- let done=false;const form=dialog.querySelector('form'),requestId=preview.resumeRequestId||crypto.randomUUID();
- form.onsubmit=event=>{event.preventDefault();if(done)return;const submit=form.querySelector('[type=submit]');busy(submit,async()=>{
-  const values=new FormData(form),status=form.querySelector('[role=status]');
-  try{await post('/api/admin/accounts/cascade-delete',{accountIds:[uid],requestId,fingerprint:preview.fingerprint,reason:values.get('reason'),typed:values.get('typed'),confirmation:values.has('confirmation')});done=true;submit.hidden=true;status.textContent='Account permanently deleted.';await refresh();}
-  catch(error){status.textContent=error.message;}
- });};dialog.showModal();
+ let done=false,pending=false;
+ const form=dialog.querySelector('form'),requestId=preview.resumeRequestId||crypto.randomUUID();
+ const {reason,confirmation}=form.elements,submit=form.querySelector('[type=submit]');
+ const ready=()=>!done&&!pending&&!preview.blocked.length&&confirmation.checked&&reason.value.trim().length>0&&reason.value.trim().length<=1000;
+ const update=()=>{submit.disabled=!ready();};
+ form.addEventListener('input',update);
+ form.onsubmit=async event=>{
+  event.preventDefault();if(!ready())return;
+  pending=true;update();
+  const status=form.querySelector('[role=status]');
+  try{
+   // The unchanged API expects this confirmation token.
+   await post('/api/admin/accounts/cascade-delete',{accountIds:[uid],requestId,fingerprint:preview.fingerprint,reason:reason.value.trim(),typed:'DELETE',confirmation:true});
+   done=true;submit.hidden=true;status.textContent='Account permanently deleted.';await refresh();
+  }catch(error){status.textContent=error.message;}
+  finally{pending=false;update();}
+ };dialog.showModal();
 }
 export function mountPermanentRemoval(host,selection,refresh,{buttonId='bulkPermanentDelete',single=false}={}){
  const button=document.createElement('button');button.type='button';button.className='btn-sm';button.id=buttonId;button.textContent=single?'Hard Delete':'Hard Delete Eligible Only';(host.querySelector('#bulkActions')||host).append(button);

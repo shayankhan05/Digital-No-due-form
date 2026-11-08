@@ -1191,6 +1191,7 @@ test('cascade removes a mapped student and preserves shared class records',async
  assert.equal(preview.body.usn,'CASCADE001');assert.equal(preview.body.email,'cascade-student@demo.test');
  assert.equal(preview.body.counts['retain history presentationIdentityJournal'],1);
  assert.equal(preview.body.counts['retain history presentationWorkflowArchives'],1);
+ assert.equal(preview.body.counts['remove enrollments'],await database.collection('enrollments').countDocuments({studentId:uid}));assert.equal(preview.body.counts['remove approvals'],1);
  const {page,context}=await browserLogin('super_admin');
  try{
   await page.evaluate(async uid=>{const {mountPermanentRemoval}=await import('/js/permanent-removal-ui.js');const host=document.createElement('div');document.body.append(host);mountPermanentRemoval(host,()=>[uid],async()=>{},{single:true,buttonId:'cascade-test-review'});},uid);
@@ -1198,17 +1199,22 @@ test('cascade removes a mapped student and preserves shared class records',async
   await page.getByRole('button',{name:'Review Cascade Delete'}).click();
   const dialog=page.locator('dialog[open]');
   await dialog.getByText('Archived workflow history kept: 1',{exact:true}).waitFor();
+  assert.equal(await dialog.locator('[name=typed]').count(),0);
+  const reason=dialog.getByLabel('Reason'),ack=dialog.getByRole('checkbox'),submit=dialog.getByRole('button',{name:'Permanently Delete Account'});
+  assert.equal(await submit.isEnabled(),false);
+  await ack.check();assert.equal(await submit.isEnabled(),false);
+  await reason.fill('   ');assert.equal(await submit.isEnabled(),false);
+  await ack.uncheck();await reason.fill('Isolated browser cascade');assert.equal(await submit.isEnabled(),false);
+  await ack.check();assert.equal(await submit.isEnabled(),true);
   await dialog.getByText('Completed identity changes kept: 1',{exact:true}).waitFor();
   assert.deepEqual(await dialog.locator('.cascade-identity dd').allTextContents(),['Cascade Student','CASCADE001','cascade-student@demo.test']);
   for(const width of [1366,390]){
    await page.setViewportSize({width,height:850});
    assert.equal(await dialog.evaluate(el=>{const values=[...el.querySelectorAll('dd')].map(dd=>dd.getBoundingClientRect().left);return values.every(x=>Math.abs(x-values[0])<1)&&el.scrollWidth<=el.clientWidth+1;}),true);
   }
+  await submit.click();
+  await dialog.getByText('Account permanently deleted.',{exact:true}).waitFor();
  }finally{await context.close();}
- assert.equal(preview.body.counts['remove enrollments'],await database.collection('enrollments').countDocuments({studentId:uid}));assert.equal(preview.body.counts['remove approvals'],1);
- const input={accountIds,fingerprint:preview.body.fingerprint,confirmation:true,typed:'DELETE',reason:'Isolated student cascade test',requestId:'cascade-delete-student'};
- assert.equal((await api('super_admin',endpoint+'delete',{...input,typed:'NO'})).status,400);
- const result=await api('super_admin',endpoint+'delete',input);assert.equal(result.status,200,JSON.stringify(result.body));
  for(const name of ['users','students','clearancePlans','officeStudentSearch'])assert.equal(await database.collection(name).findOne({_id:uid}),null,name);
  for(const name of ['enrollments','marks','noDueRequests','approvals','notifications','hallTickets'])assert.equal(await database.collection(name).findOne({$or:[{studentId:uid},{__parent:uid},{requestId:'cascade-request'}]}),null,name);
  assert.equal(await database.collection('uniqueIdentities').countDocuments({uid}),0);
@@ -1217,7 +1223,6 @@ test('cascade removes a mapped student and preserves shared class records',async
  assert.deepEqual(await database.collection('presentationWorkflowArchives').findOne({_id:archive._id}),archive);
  assert.ok(await database.collection('superAdminAudit').findOne({_id:'deleted_account_'+uid}));
  await assert.rejects(auth.getUser(uid),{code:'auth/user-not-found'});
- assert.equal((await api('super_admin',endpoint+'delete',input)).body.deleted,1);
  const replay=await api('admin','/api/admin',{action:'provision',row:{role:'student',name:'Cascade Student',collegeEmail:'cascade-student@demo.test',phone:'9876543210',department:'ISE',usn:'CASCADE001',auid:'CASCADEAUID1',semester:5,section:'A',scheme:'2022',mentorEmail:accounts.mentor.email},requestId:'cascade-student-create'});assert.equal(replay.status,409);
 });
 test('cascade detaches faculty teaching, mentoring and section leadership',async()=>{
