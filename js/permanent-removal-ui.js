@@ -1,9 +1,23 @@
 import {post} from './api.js';
 import {escapeHtml as e,busy} from './ui.js';
+const dependencyNames={
+ 'retain history presentationIdentityJournal':'Completed identity changes kept',
+ 'retain history presentationWorkflowArchives':'Archived workflow history kept',
+ 'retain history bulkAccountJobs':'Historical account records kept',
+ 'retain history bulkImportJobs':'Historical import records kept',
+ 'retain history superAdminAudit':'Audit records kept'
+};
+const collectionNames={users:'Account',students:'Student profile',uniqueIdentities:'Identity reservations',enrollments:'Class enrollments',clearancePlans:'Clearance plans',officeStudentSearch:'Directory search records',provisioningJobs:'Account setup records',noDueRequests:'No-Due requests',hallTickets:'Hall tickets',offerings:'Subject offerings',sectionDetails:'Section assignments'};
+function dependencyLabel(key){
+ if(dependencyNames[key])return dependencyNames[key];
+ const split=key.lastIndexOf(' '),action=key.slice(0,split),collection=key.slice(split+1);
+ const subject=collectionNames[collection]||collection.replace(/[A-Z]/g,c=>' '+c.toLowerCase());
+ return ({remove:'Remove',detach:'Detach', 'retain history':'Keep history for','cancel request':'Cancel','cancel approval':'Cancel'})[action]+' '+subject.toLowerCase();
+}
 async function reviewCascade(uid,refresh){
  const preview=await post('/api/admin/accounts/cascade-preflight',{accountIds:[uid]});
  const dialog=document.createElement('dialog');dialog.className='card';
- dialog.innerHTML=`<h2>Review Cascade Delete</h2><p><strong>${e(preview.name)}</strong></p><p>Deleting this account will also remove or detach the following dependent records.</p><p>Permanent Institutional Exit disables login and preserves the account's institutional history. Cascade Delete removes the account and its operational mappings.</p><ul>${Object.entries(preview.counts).filter(([,n])=>n).map(([label,n])=>`<li>${e(label)}: ${n}</li>`).join('')}</ul>${preview.warnings.map(w=>`<p>${e(w)}</p>`).join('')}${preview.blocked.length?`<p role="alert">Unresolved dependencies: ${e(preview.blocked.join(', '))}. No deletion is available.</p>`:''}<form><label>Reason<textarea name="reason" required maxlength="1000"></textarea></label><label>Type DELETE<input name="typed" required pattern="DELETE" autocomplete="off"></label><label class="confirmation-row"><input name="confirmation" type="checkbox" required> I understand that this account and its mapped operational records will be permanently deleted and this action cannot be undone.</label><div class="provision-actions"><button type="submit" class="btn-primary" ${preview.blocked.length?'disabled':''}>Permanently Delete Account</button><button type="button" class="btn-sm" data-close>Close</button></div><p role="status"></p></form>`;
+ dialog.innerHTML=`<h2>Review Cascade Delete</h2><dl class="cascade-identity"><dt>Name</dt><dd>${e(preview.name||'Not provided')}</dd>${preview.usn?`<dt>USN</dt><dd>${e(preview.usn)}</dd>`:preview.facultyId?`<dt>Employee ID</dt><dd>${e(preview.facultyId)}</dd>`:''}<dt>Email</dt><dd>${e(preview.email||'Not provided')}</dd></dl><p>Deleting this account will also remove or detach the following dependent records.</p><p>Permanent Institutional Exit disables login and preserves the account's institutional history. Cascade Delete removes the account and its operational mappings.</p><ul>${Object.entries(preview.counts).filter(([,n])=>n).map(([label,n])=>`<li>${e(dependencyLabel(label))}: ${n}</li>`).join('')}</ul>${preview.warnings.map(w=>`<p>${e(w)}</p>`).join('')}${preview.blocked.length?`<p role="alert">Unresolved dependencies: ${e(preview.blocked.join(', '))}. No deletion is available.</p>`:''}<form><label>Reason<textarea name="reason" required maxlength="1000"></textarea></label><label>Type DELETE<input name="typed" required pattern="DELETE" autocomplete="off"></label><label class="confirmation-row"><input name="confirmation" type="checkbox" required> I understand that this account and its mapped operational records will be permanently deleted and this action cannot be undone.</label><div class="provision-actions"><button type="submit" class="btn-primary" ${preview.blocked.length?'disabled':''}>Permanently Delete Account</button><button type="button" class="btn-sm" data-close>Close</button></div><p role="status"></p></form>`;
  document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.querySelector('[data-close]').onclick=()=>dialog.close();
  let done=false;const form=dialog.querySelector('form'),requestId=preview.resumeRequestId||crypto.randomUUID();
  form.onsubmit=event=>{event.preventDefault();if(done)return;const submit=form.querySelector('[type=submit]');busy(submit,async()=>{

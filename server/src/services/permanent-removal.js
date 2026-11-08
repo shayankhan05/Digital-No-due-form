@@ -37,6 +37,8 @@ async function cascadePlan(database,actor,uid,session){
  if(!user||uid===actor.uid||user.accountStatus==='deleting'||user.role!=='student'&&!facultyRoles.has(user.role))fail('This account is not eligible for cascade deletion.');
  if((await authorizeAccountTarget(database,actor,user)).role!=='super_admin')fail('Only Super Admin may cascade delete accounts.','permission-denied');
  const student=user.role==='student',staff=!student;
+ const profile=student?await database.collection('students').findOne({_id:uid},options):null;
+ const identity={name:user.name,email:user.email,...(student?{usn:profile?.usn||user.usn||'Not provided'}:{facultyId:user.facultyId||'Not provided'})};
  const leadership=await database.collection('departments').findOne({$or:[{adminId:uid},{departmentAdminId:uid},{hodId:uid}]},options);
  if(leadership)fail('Assign replacement department leadership before cascade deletion.');
  const names=(await database.listCollections().toArray()).map(x=>x.name).filter(n=>!n.startsWith('system.')).sort();
@@ -51,7 +53,10 @@ async function cascadePlan(database,actor,uid,session){
      if(!references(row,ids))continue;
      const refUid=references(row,new Set([uid]));
      if(name==='users'&&row._id===uid){mark(name,row,'remove');continue;}
-     if(historical.has(name)){mark(name,row,'retain history');continue;}
+     // Completed migration journals and backed-up workflow snapshots are history, not live mappings.
+     const presentationHistory=name==='presentationIdentityJournal'&&row.state==='complete'&&typeof row.uid==='string'||
+       name==='presentationWorkflowArchives'&&typeof row.studentId==='string'&&typeof row.requestId==='string'&&row.backupReference&&row.digest&&Array.isArray(row.records?.noDueRequests);
+     if(presentationHistory||historical.has(name)){mark(name,row,'retain history');continue;}
      if(name==='uniqueIdentities'&&row.uid===uid||name==='provisioningJobs'&&(row._id===uid||row.result?.uid===uid)){mark(name,row,'remove');continue;}
      if(['bulkImportJobs','bulkAccountJobs'].includes(name)&&row.state==='complete'){mark(name,row,'retain history');continue;}
      if(student&&(
@@ -110,7 +115,7 @@ async function cascadePlan(database,actor,uid,session){
    }
  }
  const fingerprint=createHash('sha256').update(JSON.stringify(changes.map(x=>[x.collection,x.action,x.row,x.fields]))).digest('hex');
- return {user,changes,counts,blocked:[...new Set(blocked)],warnings:[...new Set(warnings)],fingerprint};
+ return {user,identity,changes,counts,blocked:[...new Set(blocked)],warnings:[...new Set(warnings)],fingerprint};
 }
 export function permanentRemovalRoutes(app,{database,client,auth}){
  const validate=async(req)=>{if(req.actor.role!=='super_admin')fail('Only Super Admin may hard delete accounts.','permission-denied');const ids=req.body.accountIds;if(!Array.isArray(ids)||!ids.length||ids.length>100||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(id)))fail('Select 1–100 unique accounts.');for(const uid of ids){const target=await database.collection('users').findOne({_id:uid});if(target&&target._id!==req.actor.uid&&target.role!=='super_admin'&&(await authorizeAccountTarget(database,req.actor,target)).role!=='super_admin')fail('Only Super Admin may hard delete accounts.','permission-denied');}return ids;};
@@ -124,7 +129,7 @@ export function permanentRemovalRoutes(app,{database,client,auth}){
    return res.json({uid,name:pending.name,...job.preview,resumeRequestId:job.requestId});
   }
   const plan=await cascadePlan(database,req.actor,uid);
-  res.json({uid,name:plan.user.name,counts:plan.counts,blocked:plan.blocked,warnings:plan.warnings,fingerprint:plan.fingerprint});
+  res.json({uid,...plan.identity,counts:plan.counts,blocked:plan.blocked,warnings:plan.warnings,fingerprint:plan.fingerprint});
  });
  app.post('/api/admin/accounts/cascade-delete',async(req,res)=>{
   const [uid,...extra]=await validate(req),{confirmation,typed,requestId,fingerprint}=req.body,reason=typeof req.body.reason==='string'?req.body.reason.trim():'';
@@ -158,7 +163,7 @@ export function permanentRemovalRoutes(app,{database,client,auth}){
       if(action==='cancel request')await table.updateOne(filter,{$set:{status:'cancelled',previousStatus:row.status,cancelledAt:at,cancelledBy:req.actor.uid,cancellationReason:'Assigned faculty permanently deleted',approvalStates:Object.fromEntries(Object.entries(row.approvalStates||{}).map(([k,v])=>[k,v==='pending'?'cancelled':v]))}},options);
       if(action==='cancel approval')await table.updateOne(filter,{$set:{status:'cancelled',previousStatus:'pending',cancelledAt:at,cancelledBy:req.actor.uid}},options);
     }
-    const preview={fingerprint,counts:plan.counts,blocked:plan.blocked,warnings:plan.warnings};
+    const preview={fingerprint,...plan.identity,counts:plan.counts,blocked:plan.blocked,warnings:plan.warnings};
     await jobs.insertOne({_id:id,kind:'cascade',accountIds:[uid],actorUid:req.actor.uid,requestId,state:'mongo-complete',preview,createdAt:at},options);
     await database.collection('superAdminAudit').insertOne({_id:'cascade_'+id,action:'ACCOUNT_CASCADE_DELETE',actorUid:req.actor.uid,actorRole:req.actor.role,targets:[uid],reason,counts:plan.counts,timestamp:at,summary:'Removed operational mappings; Firebase removal journaled.'},options);
    });}finally{await session.endSession();}

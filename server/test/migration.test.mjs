@@ -1173,9 +1173,38 @@ test('cascade removes a mapped student and preserves shared class records',async
  await database.collection('noDueRequests').insertOne({_id:'cascade-request',studentId:uid,status:'pending_stage1'});
  await database.collection('approvals').insertOne({_id:'cascade-request/a',__parent:'cascade-request',requestId:'cascade-request',studentId:uid,status:'pending'});
  await database.collection('notifications').insertOne({_id:'cascade-notification',__parent:uid,requestId:'cascade-request'});
+ const journal={_id:'cascade-identity-history',uid,state:'complete',backupReference:'test backup',completedAt:new Date()};
+ const archive={_id:'cascade-workflow-history',studentId:uid,requestId:'historical-cascade-request',backupReference:'test backup',digest:'test digest',records:{noDueRequests:[{_id:'historical-cascade-request',studentId:uid,status:'issued'}]}};
+ await database.collection('presentationIdentityJournal').insertOne(journal);
+ await database.collection('presentationWorkflowArchives').insertOne(archive);
+ await database.collection('presentationIdentityJournal').insertOne({_id:'cascade-unfinished-identity',uid,state:'prepared'});
+ await database.collection('cascadeUnknownFixture').insertOne({_id:'unknown',studentId:uid});
+ const blocked=await api('super_admin','/api/admin/accounts/cascade-preflight',{accountIds:[uid]});
+ assert.deepEqual(blocked.body.blocked,['cascadeUnknownFixture','presentationIdentityJournal']);
+ const blockedDelete=await api('super_admin','/api/admin/accounts/cascade-delete',{accountIds:[uid],fingerprint:blocked.body.fingerprint,confirmation:true,typed:'DELETE',reason:'Must not delete blocked fixture',requestId:'cascade-blocked-student'});
+ assert.equal(blockedDelete.status,400);assert.ok(await auth.getUser(uid));
+ await database.collection('presentationIdentityJournal').deleteOne({_id:'cascade-unfinished-identity'});
+ await database.collection('cascadeUnknownFixture').deleteOne({_id:'unknown'});
  const accountIds=[uid],endpoint='/api/admin/accounts/cascade-';
  assert.equal((await api('admin',endpoint+'preflight',{accountIds})).status,403);
  const preview=await api('super_admin',endpoint+'preflight',{accountIds});assert.equal(preview.status,200,JSON.stringify(preview.body));assert.deepEqual(preview.body.blocked,[]);
+ assert.equal(preview.body.usn,'CASCADE001');assert.equal(preview.body.email,'cascade-student@demo.test');
+ assert.equal(preview.body.counts['retain history presentationIdentityJournal'],1);
+ assert.equal(preview.body.counts['retain history presentationWorkflowArchives'],1);
+ const {page,context}=await browserLogin('super_admin');
+ try{
+  await page.evaluate(async uid=>{const {mountPermanentRemoval}=await import('/js/permanent-removal-ui.js');const host=document.createElement('div');document.body.append(host);mountPermanentRemoval(host,()=>[uid],async()=>{},{single:true,buttonId:'cascade-test-review'});},uid);
+  await page.locator('#cascade-test-review').click();
+  await page.getByRole('button',{name:'Review Cascade Delete'}).click();
+  const dialog=page.locator('dialog[open]');
+  await dialog.getByText('Archived workflow history kept: 1',{exact:true}).waitFor();
+  await dialog.getByText('Completed identity changes kept: 1',{exact:true}).waitFor();
+  assert.deepEqual(await dialog.locator('.cascade-identity dd').allTextContents(),['Cascade Student','CASCADE001','cascade-student@demo.test']);
+  for(const width of [1366,390]){
+   await page.setViewportSize({width,height:850});
+   assert.equal(await dialog.evaluate(el=>{const values=[...el.querySelectorAll('dd')].map(dd=>dd.getBoundingClientRect().left);return values.every(x=>Math.abs(x-values[0])<1)&&el.scrollWidth<=el.clientWidth+1;}),true);
+  }
+ }finally{await context.close();}
  assert.equal(preview.body.counts['remove enrollments'],await database.collection('enrollments').countDocuments({studentId:uid}));assert.equal(preview.body.counts['remove approvals'],1);
  const input={accountIds,fingerprint:preview.body.fingerprint,confirmation:true,typed:'DELETE',reason:'Isolated student cascade test',requestId:'cascade-delete-student'};
  assert.equal((await api('super_admin',endpoint+'delete',{...input,typed:'NO'})).status,400);
@@ -1184,6 +1213,9 @@ test('cascade removes a mapped student and preserves shared class records',async
  for(const name of ['enrollments','marks','noDueRequests','approvals','notifications','hallTickets'])assert.equal(await database.collection(name).findOne({$or:[{studentId:uid},{__parent:uid},{requestId:'cascade-request'}]}),null,name);
  assert.equal(await database.collection('uniqueIdentities').countDocuments({uid}),0);
  assert.ok(await database.collection('offerings').findOne({_id:'cascade-class'}));assert.ok(await database.collection('subjects').findOne({_id:'cascade-subject'}));assert.ok(await database.collection('users').findOne({_id:teacher}));
+ assert.deepEqual(await database.collection('presentationIdentityJournal').findOne({_id:journal._id}),journal);
+ assert.deepEqual(await database.collection('presentationWorkflowArchives').findOne({_id:archive._id}),archive);
+ assert.ok(await database.collection('superAdminAudit').findOne({_id:'deleted_account_'+uid}));
  await assert.rejects(auth.getUser(uid),{code:'auth/user-not-found'});
  assert.equal((await api('super_admin',endpoint+'delete',input)).body.deleted,1);
  const replay=await api('admin','/api/admin',{action:'provision',row:{role:'student',name:'Cascade Student',collegeEmail:'cascade-student@demo.test',phone:'9876543210',department:'ISE',usn:'CASCADE001',auid:'CASCADEAUID1',semester:5,section:'A',scheme:'2022',mentorEmail:accounts.mentor.email},requestId:'cascade-student-create'});assert.equal(replay.status,409);
