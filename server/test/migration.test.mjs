@@ -1370,3 +1370,102 @@ test('teaching assignment management scopes both admins and preserves marks and 
   }finally{await context.close();}
  }
 });
+
+test('test cleanup requires reviewed provenance and preserves shared records in a transactional purge',async()=>{
+ const {testRecordDigest}=await import('../src/services/test-data-cleanup.js'),{createDecipheriv}=await import('node:crypto'),key='ac'.repeat(32);
+ const fixture=createApp({database,client,auth,demo:true,testDataBackupKey:key}).app,route='/api/administration/test-data-cleanup';
+ const call=async(role,suffix='',body)=>{const req=body?request(fixture).post(route+suffix).send(body):request(fixture).get(route+suffix);return req.set('Authorization','Bearer '+await token(accounts[role].email));};
+ const email='provenance-test-faculty@demo.test',identity=await auth.createUser({email,disabled:true});
+ const user={_id:identity.uid,name:'Reviewed fixture',email,facultyId:'PROVENANCE-FAC',role:'subject_faculty',department:'ISE',accountStatus:'inactive'};
+ const unclassified={_id:'not-reviewed-test-looking',name:'Demo without evidence',role:'subject_faculty',email:'unreviewed@demo.test',dataOrigin:'test'};
+ const offering={_id:'provenance-fixture-offering',teacherId:user._id,subjectCode:'FIX501',active:false};
+ const shared={_id:'provenance-shared-student',name:'Preserved student',teacherIds:[user._id],offeringIds:[offering._id],department:'ISE'};
+ await database.collection('users').insertMany([user,unclassified]);await database.collection('offerings').insertOne(offering);await database.collection('students').insertOne(shared);
+ const reservation={_id:'provenance-reservation',uid:user._id};await database.collection('uniqueIdentities').insertOne(reservation);
+ const entry=(collection,row)=>({_id:'prov-'+collection,collection,recordId:row._id,origin:'test',evidence:'Isolated verified test fixture',digest:testRecordDigest(row)});
+ await database.collection('testDataRegistry').insertMany([entry('users',user),entry('offerings',offering)]);
+ assert.equal((await call('admin')).status,403);assert.equal((await call('subject_faculty')).status,403);
+ const guard=await api('super_admin','/api/data/query',{path:'testDataCleanupBackups'});assert.equal(guard.status,403);
+ const mixed={_id:'provenance-mixed-request',studentId:shared._id,status:'pending_stage1',approvalItems:{fixture:{offeringId:offering._id},current:{offeringId:'protected-current'}}};
+ await database.collection('noDueRequests').insertOne(mixed);
+ const {recordDigest}=await import('../src/services/presentation-reset.js');
+ const archived={_id:'provenance-preserved-archive',backupReference:'isolated-fixture',records:{noDueRequests:[{approvalItems:{legacy:{offeringId:offering._id,approverId:user._id,teacherName:user.name,subjectCode:'FIX501',subjectName:'Fixture class'}},approvalStates:{legacy:'approved'}}]}};archived.digest=recordDigest(archived.records);await database.collection('presentationWorkflowArchives').insertOne(archived);
+ const blocked=await call('super_admin');assert.equal(blocked.status,200,JSON.stringify(blocked.body));assert.ok(blocked.body.blocked.some(r=>r.collection==='noDueRequests'));assert.deepEqual(await database.collection('noDueRequests').findOne({_id:mixed._id}),mixed);
+ assert.equal((await call('super_admin','/purge',{confirmation:'PURGE TEST DATA',fingerprint:blocked.body.fingerprint})).status,400);
+ await database.collection('testDataRegistry').insertOne(entry('noDueRequests',mixed));
+ const reviewedMixed=await call('super_admin');assert.ok(reviewedMixed.body.blocked.some(r=>r.collection==='noDueRequests'&&r.reason.includes('retained offering')));
+ await database.collection('testDataRegistry').deleteOne({_id:'prov-noDueRequests'});
+ await database.collection('noDueRequests').deleteOne({_id:mixed._id});
+ const currentOffering={_id:'provenance-current-offering',teacherId:accounts.subject_faculty.uid,subjectCode:'FIX502',active:true};
+ const currentMark={_id:'provenance-current-mark',offeringId:currentOffering._id,studentId:shared._id,teacherId:currentOffering.teacherId,updatedBy:user._id,scores:{IA1:12}};
+ await database.collection('offerings').insertOne(currentOffering);
+ await database.collection('marks').insertOne(currentMark);
+ assert.ok((await call('super_admin')).body.blocked.some(r=>r.collection==='marks'));
+ const records={attributions:[{collection:'marks',id:currentMark._id,digest:testRecordDigest(currentMark),faculty:{name:user.name,employeeId:user.facultyId}}]};
+ await database.collection('testDataHistoricalAttributions').insertOne({_id:'fixture-attributions',records,digest:testRecordDigest(records)});
+ assert.equal((await api('super_admin','/api/data/query',{path:'testDataHistoricalAttributions'})).status,403);
+ await database.collection('marks').updateOne({_id:currentMark._id},{$set:{scores:{IA1:13}}});
+ assert.ok((await call('super_admin')).body.blocked.some(r=>r.collection==='marks'));
+ await database.collection('marks').replaceOne({_id:currentMark._id},currentMark);
+ const reviewed=await call('super_admin');assert.equal(reviewed.status,200,JSON.stringify(reviewed.body));assert.deepEqual(reviewed.body.blocked,[]);assert.equal(reviewed.body.total,3);assert.equal(reviewed.body.detach.students,1);assert.equal(reviewed.body.firebaseAccounts,1);
+ assert.ok(await auth.getUser(user._id));assert.equal((await call('super_admin','/purge',{confirmation:'wrong',fingerprint:reviewed.body.fingerprint})).status,400);
+ const stale=await call('super_admin','/purge',{confirmation:'PURGE TEST DATA',fingerprint:'0'.repeat(64)});assert.equal(stale.status,400);
+ const remove=auth.deleteUser.bind(auth);auth.deleteUser=async()=>{throw Error('Isolated Firebase interruption');};
+ try{assert.equal((await call('super_admin','/purge',{confirmation:'PURGE TEST DATA',fingerprint:reviewed.body.fingerprint})).status,400);}finally{auth.deleteUser=remove;}
+ assert.equal((await call('super_admin')).body.pendingJob,reviewed.body.fingerprint);
+ const result=await call('super_admin','/resume',{id:reviewed.body.fingerprint});assert.equal(result.status,200,JSON.stringify(result.body));
+ assert.equal(result.body.retainedHistory.presentationWorkflowArchives,1);assert.deepEqual(await database.collection('presentationWorkflowArchives').findOne({_id:archived._id}),archived);
+ assert.equal(result.body.retainedHistory.marks,1);assert.deepEqual(await database.collection('marks').findOne({_id:currentMark._id}),currentMark);
+ assert.equal(result.body.firebaseRemaining,0);assert.equal(await database.collection('users').findOne({_id:user._id}),null);assert.equal(await database.collection('offerings').findOne({_id:offering._id}),null);
+ assert.deepEqual(await database.collection('students').findOne({_id:shared._id}),{...shared,teacherIds:[],offeringIds:[]});
+ assert.deepEqual(await database.collection('users').findOne({_id:unclassified._id}),unclassified);
+ await assert.rejects(auth.getUser(user._id),{code:'auth/user-not-found'});
+ const backup=await database.collection('testDataCleanupBackups').findOne({_id:result.body.backupId});
+ const decipher=createDecipheriv('aes-256-gcm',Buffer.from(key,'hex'),Buffer.from(backup.iv,'base64'));decipher.setAuthTag(Buffer.from(backup.tag,'base64'));
+ const recovered=JSON.parse(Buffer.concat([decipher.update(Buffer.from(backup.data,'base64')),decipher.final()]).toString());
+ assert.equal(recovered.records.length,3);assert.equal(recovered.detached.length,1);
+ assert.ok(await database.collection('superAdminAudit').findOne({action:'TEST_DATA_PURGED',backupId:result.body.backupId}));
+ const retry=await call('super_admin','/resume',{id:result.body.id});assert.deepEqual(retry.body,result.body);
+});
+
+
+test('reviewed migration commits mixed request changes with the purge and resumes Firebase cleanup',async()=>{
+ const {finishTestPurge,testDataPlan,testRecordDigest,writeTestPurge}=await import('../src/services/test-data-cleanup.js');
+ const email='operator-review-faculty@demo.test',identity=await auth.createUser({email});
+ const user={_id:identity.uid,name:'Reviewed legacy teacher',email,role:'subject_faculty',facultyId:'OPERATOR-REVIEW-FAC'};
+ const inactive={...user,accountStatus:'deactivated',authDisabled:true};
+ const request={_id:'operator-mixed-request',status:'pending_stage1',studentId:'operator-student',approvalItems:{old:{approverId:user._id},current:{approverId:accounts.library.uid}}};
+ const currentApproval={_id:'operator-mixed-request/current',requestId:request._id,approverId:accounts.library.uid,status:'approved',actedAt:new Date()};
+ const oldApproval={_id:'operator-mixed-request/old',requestId:request._id,approverId:user._id,status:'rejected',actedAt:new Date()};
+ const next={...request,approvalItems:{current:request.approvalItems.current}};
+ const registry=[{_id:'operator-review',collection:'users',recordId:user._id,digest:testRecordDigest(inactive),origin:'test',evidence:'Exact isolated test identity'}];
+ const records={attributions:[],mixedRequests:[{requestId:request._id,approval:oldApproval}]};
+ const archive={_id:'operator-review-archive',records,digest:testRecordDigest(records)};
+ const revisions=[{collection:'users',before:user,after:inactive},{collection:'noDueRequests',before:request,after:next},{collection:'approvals',before:oldApproval,after:null}];
+ const {cleanupCollectionNames,readDatabase}=await import('../src/services/test-data-cleanup.js');
+ const snapshot=await readDatabase(database,await cleanupCollectionNames(database));
+ const plan=testDataPlan({...snapshot,students:[...(snapshot.students||[]),{_id:request.studentId,department:'ISE'}],users:[...snapshot.users,inactive],noDueRequests:[...(snapshot.noDueRequests||[]),next],
+  approvals:[...(snapshot.approvals||[]),currentApproval],testDataRegistry:registry});
+ assert.deepEqual(plan.summary.blocked,[]);
+ await database.collection('users').insertOne(user);
+ await database.collection('noDueRequests').insertOne(request);
+ await database.collection('students').insertOne({_id:request.studentId,department:'ISE'});
+ await database.collection('approvals').insertMany([oldApproval,currentApproval]);
+ const session=client.startSession();
+ try{
+  const commit=()=>writeTestPurge({database,session,plan,registry,revisions,archive,key:Buffer.alloc(32,3),actorUid:'operator:test'});
+  await assert.rejects(session.withTransaction(async()=>{await commit();throw Error('rollback fixture');}),/rollback fixture/);
+  assert.deepEqual(await database.collection('noDueRequests').findOne({_id:request._id}),request);
+  assert.equal((await auth.getUser(user._id)).disabled,false);
+  const id=await session.withTransaction(commit);
+  assert.equal((await auth.getUser(user._id)).disabled,false);
+  assert.deepEqual(await database.collection('noDueRequests').findOne({_id:request._id}),next);
+  assert.deepEqual(await database.collection('approvals').findOne({_id:currentApproval._id}),currentApproval);
+  assert.equal(await database.collection('approvals').findOne({_id:oldApproval._id}),null);
+  assert.deepEqual((await database.collection('testDataHistoricalAttributions').findOne({_id:archive._id})).records,records);
+  const report=await finishTestPurge({database,auth,id});
+  assert.deepEqual(report.archivedAndRemoved,{approvals:1});
+  assert.equal(report.firebaseRemaining,0);
+  await assert.rejects(auth.getUser(user._id),{code:'auth/user-not-found'});
+ }finally{await session.endSession();}
+});

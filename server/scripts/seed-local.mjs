@@ -12,7 +12,7 @@ if(project!=='demo-digital-no-due'||host!=='127.0.0.1:9199'||new URL(uri).hostna
 process.env.FIREBASE_PROJECT_ID=project;process.env.FIREBASE_AUTH_EMULATOR_HOST=host;
 const {client,database}=await connectDatabase(uri),store=new DocumentStore(database,client),{auth,app}=firebaseAdmin();
 try{
- let inserted=0;if(!await database.collection('users').countDocuments()){const rows=JSON.parse(await readFile(new URL('migration-output/firestore-export.json',root),'utf8'),(k,v)=>typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(v)?new Date(v):v);for(const row of rows){if(!(await store.doc(row.path).get()).exists){await store.doc(row.path).set(row.data);inserted++;}}}
+ let inserted=0;if(!await database.collection('users').countDocuments()){const rows=JSON.parse(await readFile(new URL('migration-output/firestore-export.json',root),'utf8'),(k,v)=>typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(v)?new Date(v):v);for(const row of rows){if(!(await store.doc(row.path).get()).exists){await store.doc(row.path).set({...row.data,dataOrigin:'test'});inserted++;}}}
  console.log('Department normalization:',JSON.stringify(await migrateDemoDepartment(database,client,{apply:true})));
  const saved=JSON.parse(await readFile(new URL('auth-emulator-backup/auth_export/accounts.json',root),'utf8')),existing=[];let cursor;do{const page=await auth.listUsers(1000,cursor);existing.push(...page.users);cursor=page.pageToken;}while(cursor);
  const ids=new Set(existing.map(u=>u.uid)),emails=new Map(existing.map(u=>[u.email?.toLowerCase(),u.uid]));const missing=[];

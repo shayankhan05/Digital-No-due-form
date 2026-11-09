@@ -430,7 +430,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     }
     await jobRef.set({state:'auth-created',updatedAt:stamp()},{merge:true});
     const previousProfile=(await db.doc(`users/${uid}`).get()).data();
-    const profile={...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,email:row.collegeEmail,phone:row.phone,...(row.departmentId?{departmentId:row.departmentId}:{}),...(row.strictDepartmentScope?{strictDepartmentScope:true}:{}),department:row.department,scope:row.scope,facultyId:row.facultyId,role:row.role,scheme:row.scheme,updatedAt:stamp(),...(temporaryAccount(row,p)&&!previousProfile?{mustChangePassword:true,temporaryPasswordIssuedAt:new Date(Date.now()+1)}: {})};
+    const profile={...(demo?{dataOrigin:'test'}:{}),...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,email:row.collegeEmail,phone:row.phone,...(row.departmentId?{departmentId:row.departmentId}:{}),...(row.strictDepartmentScope?{strictDepartmentScope:true}:{}),department:row.department,scope:row.scope,facultyId:row.facultyId,role:row.role,scheme:row.scheme,updatedAt:stamp(),...(temporaryAccount(row,p)&&!previousProfile?{mustChangePassword:true,temporaryPasswordIssuedAt:new Date(Date.now()+1)}: {})};
     const batch=db.batch(row.role==='student'?[{path:`users/${row.mentorId}`,capability:'mentor'}]:[]);batch.set(db.doc(`users/${uid}`),profile,{merge:true});
     const {mustChangePassword,temporaryPasswordIssuedAt,...studentFields}=profile;
     if(row.role==='student') batch.set(db.doc(`students/${uid}`),{uid,...studentFields,usn:row.usn,...(row.auid?{auid:row.auid}:{}),semester:row.semester,section:row.section,mentorId:row.mentorId},{merge:true});

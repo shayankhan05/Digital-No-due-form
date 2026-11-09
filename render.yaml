@@ -24,3 +24,5 @@ services:
         sync: false
       - key: FRONTEND_ORIGIN
         sync: false
+      - key: TEST_DATA_BACKUP_KEY
+        sync: false

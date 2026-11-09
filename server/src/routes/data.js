@@ -9,7 +9,7 @@ import {canRead,scopeQuery} from '../services/authorization.js';
 import {matchesStudent,syncStudentWorkflow} from '../services/clearance.js';
 import {syncOfficeSearchIndex} from '../services/office-search.js';
 const forbidden=()=>{throw Object.assign(new Error('This operation is not allowed.'),{code:'permission-denied'});};
-export function validPath(path){if(typeof path!=='string'||!/^([A-Za-z][A-Za-z0-9]*)(\/[A-Za-z0-9_-]{1,200}){0,3}$/.test(path))throw Object.assign(new Error('Invalid data path.'),{code:'invalid-argument'});return path;}
+export function validPath(path){if(typeof path==='string'&&['testDataRegistry','testDataCleanupJobs','testDataCleanupBackups','testDataHistoricalAttributions'].includes(path.split('/')[0]))forbidden();if(typeof path!=='string'||!/^([A-Za-z][A-Za-z0-9]*)(\/[A-Za-z0-9_-]{1,200}){0,3}$/.test(path))throw Object.assign(new Error('Invalid data path.'),{code:'invalid-argument'});return path;}
 export const serialize=value=>value instanceof Date?{__date:value.toISOString()}:Array.isArray(value)?value.map(serialize):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,serialize(v)])):value;
 export const values=value=>Array.isArray(value)?value.map(values):value&&typeof value==='object'?value.__type==='timestamp'?new Date():value.__type==='arrayRemove'?{__operation:'arrayRemove',values:value.values}:Object.fromEntries(Object.entries(value).map(([k,v])=>[k,values(v)])):value;
 export async function saveMark(store,actor,id,data){
