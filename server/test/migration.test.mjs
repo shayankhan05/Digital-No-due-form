@@ -1469,3 +1469,114 @@ test('reviewed migration commits mixed request changes with the purge and resume
   await assert.rejects(auth.getUser(user._id),{code:'auth/user-not-found'});
  }finally{await session.endSession();}
 });
+
+
+test('20-row teaching CSV resumes its checkpoint and completes in the background',async()=>{
+ const {collegeImportRoutes}=await import('../src/services/college-import.js');
+ const {auditIntegrity,integritySnapshot}=await import('../src/services/integrity-audit.js');
+ const code=process.env.TEACHING_JOB_TEST_CSV?'ISE':'JOBISE';
+ const dept={_id:'teaching-background-ise',code,codeKey:code,name:code,nameKey:code,status:'active',sections:['A','B','C','D']};
+ const scheme={_id:'teaching-background-scheme',code:'2022',name:'2022',status:'active',scope:'institution'};
+ await database.collection('departments').insertOne(dept);
+ await database.collection('schemes').updateOne({code:'2022'},{$setOnInsert:scheme},{upsert:true});
+ const fallback=csvOf(['A','B','C','D'].flatMap(section=>Array.from({length:5},(_,i)=>({
+  department:code,subject_code:'JOB'+(501+i),subject_name:'Job Subject '+i,scheme:'2022',semester:'5',section,
+  faculty_employee_id:'ISE-FAC-'+(i+1),credits:'3',active:'true',
+ }))),['department','subject_code','subject_name','scheme','semester','section','faculty_employee_id','credits','active']);
+ const csv=process.env.TEACHING_JOB_TEST_CSV?await readFile(process.env.TEACHING_JOB_TEST_CSV,'utf8'):fallback;
+ const rows=parseCollegeCSV(csv,'teaching');
+ assert.equal(rows.length,20);
+ const actor={uid:accounts.super_admin.uid,role:'super_admin',managementDepartmentId:dept._id};
+ for(const employeeId of new Set(rows.map(r=>r.employeeId))){
+  const uid='job-fixture-'+employeeId,email=uid.toLowerCase()+'@demo.test';
+  await database.collection('users').insertOne({_id:uid,email,facultyId:employeeId,name:employeeId,role:'subject_faculty',department:code,departmentId:dept._id});
+ }
+ const policy=await database.collection('institutionPolicy').findOne({_id:'institution'});
+ await database.collection('institutionPolicy').updateOne({_id:'institution'},{$set:{sections:dept.sections}});
+ const service=createProvisioner({db:store,auth,demo:true});
+ const run=express();run.use(express.json(),(req,res,next)=>{req.actor=actor;next();});
+ let release;
+ const gate=new Promise(resolve=>{release=resolve;});
+ let calls=0,waiting;
+ const started=new Promise(resolve=>{waiting=resolve;});
+ collegeImportRoutes(run,{database,client,store,auth,provisionerOptions:{demo:true},service:{
+  dispatch:async(...args)=>{calls++;waiting();await gate;return service.dispatch(...args);},
+ }});
+ run.use((err,req,res,next)=>res.status(400).json({error:err.message}));
+ const post=(path,body)=>request(run).post('/api/college-import/'+path).send(body);
+ const preview=()=>post('preview',{type:'teaching',rows,requestId:crypto.randomUUID(),background:true});
+ const jobs=database.collection('bulkImportJobs');
+ const integrityBefore=new Set(auditIntegrity(await integritySnapshot(database)).issues.map(JSON.stringify));
+ try{
+  const checked=await preview();
+  assert.equal(checked.body.valid,20,JSON.stringify(checked.body));
+  const id=checked.body.jobId;
+  assert.equal((await preview()).body.jobId,id);
+  const job=await jobs.findOne({_id:id});
+  const first=await service.dispatch(actor.uid,{action:'importOffering',row:job.rows[0]});
+  const firstResult={...first,index:0,error:''};
+  await jobs.updateOne({_id:id},{$set:{state:'importing',leaseOwner:'expired-test-worker',leaseUntil:new Date(0),results:[firstResult]}});
+  const read=()=>request(run).get('/api/college-import/jobs/'+id);
+  const expired=await read();assert.equal(expired.body.status,'interrupted');assert.equal(expired.body.safeToResume,true);
+  const confirm=()=>post('confirm',{jobId:id,confirmation:true,background:true});
+  const pending=await confirm();
+  assert.equal(pending.status,202,JSON.stringify(pending.body));
+  assert.equal(pending.body.jobId,id);assert.equal(pending.body.status,'queued');
+  await started;
+  const second=await confirm();
+  assert.equal(second.body.jobId,id);assert.equal(second.body.status,'running');assert.equal(second.body.safeToResume,false);
+  assert.equal((await read()).body.processed,1);
+  release();
+  let done;
+  for(let i=0;i<200;i++){
+   done=(await read()).body;
+   if(['completed','failed','interrupted'].includes(done.status))break;
+   await new Promise(resolve=>setTimeout(resolve,25));
+  }
+  assert.equal(done.status,'completed',JSON.stringify(done));
+  assert.equal(done.processed,20);assert.equal(done.created,20);assert.equal(done.errors,0);assert.equal(calls,19);
+  assert.equal((await confirm()).body.status,'completed');assert.equal(calls,19);
+  assert.equal((await request(run).get('/api/college-import/jobs/latest')).body.jobId,id);
+  const offers=await database.collection('offerings').find({departmentId:dept._id,subjectCode:{$in:rows.map(r=>r.subjectCode)}}).toArray();
+  assert.equal(offers.length,20);
+  assert.equal(await database.collection('subjects').countDocuments({departmentId:dept._id,code:{$in:rows.map(r=>r.subjectCode)}}),5);
+  assert.ok(offers.every(o=>new Set(o.components.map(c=>c.id)).size===o.components.length));
+  assert.deepEqual(auditIntegrity(await integritySnapshot(database)).issues.filter(i=>!integrityBefore.has(JSON.stringify(i))),[]);
+  const saved=await jobs.findOne({_id:id});
+  assert.equal(saved.leaseOwner,undefined);
+  assert.deepEqual(saved.results.map(r=>r.index),Array.from({length:20},(_,i)=>i));
+  const ui=await browserLogin('super_admin');
+  try{
+   const page=ui.page;
+   let accepted=false,completed=false,confirmCalls=0;
+   await page.route('**/api/college-import/preview',route=>route.fulfill({json:checked.body}));
+   await page.route('**/api/college-import/confirm',async route=>{
+    confirmCalls++;accepted=true;
+    await route.abort('timedout');
+   });
+   await page.route('**/api/college-import/jobs/*',route=>route.fulfill({
+    json:completed?done:{...done,status:accepted?'running':'ready',processed:accepted?1:0,results:[]},
+   }));
+   await page.evaluate(({uid,id})=>sessionStorage.setItem('department-context:'+uid,id),{uid:actor.uid,id:dept._id});
+   await page.goto('http://127.0.0.1:5051/super-admin-dashboard.html#subjects-teaching');
+   await page.locator('body.workspace-ready').waitFor();
+   await page.locator('#importFile').setInputFiles({name:'teaching.csv',mimeType:'text/csv',buffer:Buffer.from(csv)});
+   await page.locator('#previewBtn').click();
+   await page.waitForFunction(()=>document.getElementById('importProgress')?.textContent.startsWith('Preview ready'));
+   await page.locator('#acceptWarnings').check();
+   await page.locator('#importBtn').click();
+   await page.waitForFunction(()=>document.getElementById('importProgress')?.textContent.includes('Import is still running in the background.'));
+   assert.equal(await page.locator('#importBtn').isDisabled(),true);
+   await page.reload();
+   await page.waitForFunction(()=>document.getElementById('importProgress')?.textContent.includes('Import is still running in the background.'));
+   completed=true;
+   await page.waitForFunction(()=>document.getElementById('importProgress')?.textContent.match(/^Completed.*20\/20/));
+   assert.equal(await page.locator('#downloadReport').isEnabled(),true);
+   assert.equal(confirmCalls,1);
+  }finally{await ui.context.close();}
+
+ }finally{
+  release();
+  if(policy)await database.collection('institutionPolicy').replaceOne({_id:'institution'},policy);
+ }
+});

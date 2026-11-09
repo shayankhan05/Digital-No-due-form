@@ -59,23 +59,175 @@ export function collegeImportRoutes(app,{database,client,store,auth,provisionerO
    else chunk=await validator.dispatch(req.actor.uid,{action:type==='students'?'previewAccounts':type==='teachers'?'previewTeachers':'previewOfferings',rows:scoped.rows.slice(offset,offset+100)});
    for(const entry of chunk.rows){entry.index+=offset;const original=scoped.rows[entry.index],keys=type==='teaching'?(entry.status==='ERROR'?[]:[teachingAssignmentKey(entry.row)].filter(Boolean)):type==='students'?['email:'+String(original.collegeEmail).toLowerCase(),'identifier:'+String(original.usn).toUpperCase(),...(String(original.auid??'').trim()?['auid:'+String(original.auid).trim().toUpperCase()]:[])]:type==='teachers'?['email:'+String(original.collegeEmail).toLowerCase(),'identifier:'+String(original.employeeId).toUpperCase()]:['academic:'+JSON.stringify([original.department,original.scheme||'',Number(original.semester),String(original.section||'').trim().toUpperCase(),String(original.subjectCode||'').trim().toUpperCase()])];if(type==='teaching'&&entry.status!=='ERROR'){const key=JSON.stringify([entry.row.department,entry.row.scheme,entry.row.subjectCode]),spec=JSON.stringify([entry.row.subjectName,entry.row.semester,entry.row.credits]),old=definitions.get(key);if(old&&old.spec!==spec){Object.assign(entry,{status:'ERROR',error:'Conflicting subject details across CSV sections.'});Object.assign(preview[old.index],{status:'ERROR',error:entry.error});}else if(!old)definitions.set(key,{spec,index:entry.index});}for(const key of keys){if(seen.has(key)){Object.assign(entry,{status:'ERROR',error:key.startsWith('auid:')?'AUID already belongs to another student.':'Duplicate identity/academic row in CSV.',duplicate:true});Object.assign(preview[seen.get(key)],{status:'ERROR',error:entry.error,duplicate:true});}else seen.set(key,entry.index);}if(type==='teaching'&&entry.error)entry.error=entry.error.replace(/offerings?/gi,'class');preview.push(entry);}
   }
-  const errors=preview.filter(r=>r.status==='ERROR').length,id=hash(req.actor.uid+':'+requestId),digest=hash(JSON.stringify([type,scoped.rows,req.actor.managementDepartmentId||'']));if(!errors){const old=await jobs.findOne({_id:id});if(old&&old.digest!==digest)fail('Import request ID belongs to another file.','already-exists');await jobs.updateOne({_id:id},{$setOnInsert:{actorUid:req.actor.uid,departmentId:req.actor.managementDepartmentId||null,type,digest,rows:preview.map(r=>r.row),state:'validated',offset:0,results:[],createdAt:new Date()}},{upsert:true});}
+  const errors=preview.filter(r=>r.status==='ERROR').length;
+  const digest=hash(JSON.stringify([type,scoped.rows,req.actor.managementDepartmentId||'']));
+  const background=type==='teaching'&&req.body.background===true;
+  let id=hash(req.actor.uid+':'+requestId);
+  if(!errors){
+   if(background){
+    const existing=await teachingJob(req.actor,digest);
+    id=existing?._id||hash('teaching:'+req.actor.uid+':'+digest);
+   }
+   const old=await jobs.findOne({_id:id});
+   if(old&&old.digest!==digest)fail('Import request ID belongs to another file.','already-exists');
+   await jobs.updateOne({_id:id},{$setOnInsert:{actorUid:req.actor.uid,departmentId:req.actor.managementDepartmentId||null,type,digest,rows:preview.map(r=>r.row),state:'validated',offset:0,results:[],createdAt:new Date()}},{upsert:true});
+  }
   res.json({jobId:errors?null:id,rows:preview,total:preview.length,valid:preview.filter(r=>r.status==='VALID').length,warnings:preview.filter(r=>r.status==='WARNING').length,errors});
  });
+
+ const leaseMs=180000;
+ const release={$unset:{leaseUntil:'',leaseOwner:''}};
+ const hasLease=job=>job.leaseUntil>Date.now();
+ const priority=job=>hasLease(job)?3:job.state==='complete'?2:job.offset||job.results.length?1:0;
+ async function teachingJob(actor,digest){
+  const matches=await jobs.find({actorUid:actor.uid,departmentId:actor.managementDepartmentId||null,type:'teaching',digest}).toArray();
+  return matches.sort((a,b)=>priority(b)-priority(a)||b.results.length-a.results.length||b.createdAt-a.createdAt)[0];
+ }
+ async function ownedJob(actor,id){
+  if(!/^[a-f0-9]{64}$/.test(id||''))fail('Validate and confirm this CSV first.');
+  const job=await jobs.findOne({_id:id});
+  if(!job||job.actorUid!==actor.uid||(job.departmentId||null)!==(actor.managementDepartmentId||null))fail('Import belongs to another administrator/department.','permission-denied');
+  if(job.type==='teaching'&&job.supersededBy){
+   const completed=await jobs.findOne({_id:job.supersededBy,actorUid:actor.uid,departmentId:job.departmentId,type:job.type,digest:job.digest});
+   if(completed)return completed;
+  }
+  return job;
+ }
+ function status(job){
+  const result=summary(job);
+  const state=hasLease(job)?(job.state==='queued'?'queued':'running')
+   :job.state==='complete'?(result.errors?'failed':'completed')
+   :job.state==='validated'&&!job.offset&&!job.results.length?'ready':'interrupted';
+  return {...result,processed:job.results.length,status:state,safeToResume:state==='interrupted',retryRevision:job.retryRevision||0};
+ }
+ app.get('/api/college-import/jobs/latest',async(req,res)=>{
+  check(req.actor);
+  const job=await jobs.findOne({
+   actorUid:req.actor.uid,departmentId:req.actor.managementDepartmentId||null,type:'teaching',
+   supersededBy:{$exists:false},updatedAt:{$exists:true},
+  },{sort:{updatedAt:-1}});
+  res.set('Cache-Control','no-store').json(job?status(await teachingJob(req.actor,job.digest)||job):null);
+ });
+ app.get('/api/college-import/jobs/:id',async(req,res)=>{
+  check(req.actor);
+  const job=await ownedJob(req.actor,req.params.id);
+  if(job.type!=='teaching')fail('Job status is available for teaching imports.');
+  res.set('Cache-Control','no-store').json(status(await teachingJob(req.actor,job.digest)||job));
+ });
+
+ async function runJob(job,actor,background){
+  const id=job._id,owner=job.leaseOwner;
+  const owned={_id:id,leaseOwner:owner};
+  let leaseLost=false;
+  const lease=()=>new Date(Date.now()+leaseMs);
+  const guard=()=>{if(leaseLost)fail('Import lease changed.','already-exists');};
+  const renew=async()=>{
+   const result=await jobs.updateOne({...owned,leaseUntil:{$gt:new Date()}},{$set:{leaseUntil:lease()}});
+   if(!result.matchedCount)leaseLost=true;
+  };
+  const heartbeat=setInterval(()=>renew().catch(()=>{leaseLost=true;}),30000);
+  heartbeat.unref();
+  try{
+   if(background){
+    const started=await jobs.updateOne({...owned,leaseUntil:{$gt:new Date()}},{$set:{state:'importing',updatedAt:new Date()}});
+    if(!started.matchedCount)fail('Import lease changed.','already-exists');
+   }
+   do{
+    const end=Math.min(job.offset+10,job.rows.length);
+    const results=await runImportRows({
+     start:job.offset,end,previous:job.results,
+     checkpoint:async entry=>{
+      guard();
+      const saved=await jobs.updateOne({...owned,leaseUntil:{$gt:new Date()}},[{$set:{
+       results:{$concatArrays:[{$filter:{input:{$ifNull:['$results',[]]},as:'row',cond:{$ne:['$$row.index',entry.index]}}},{$literal:[entry]}]},
+       leaseUntil:{$literal:lease()},updatedAt:{$literal:new Date()},
+      }}]);
+      if(!saved.matchedCount)fail('Import lease changed.','already-exists');
+     },
+     process:async index=>{
+      guard();
+      const row=job.rows[index];
+      try{
+       await scopedAdminInput(database,actor,{row});
+       let result;
+       if(job.type==='subjects'){
+        const checked=await subjectRow(database,row);
+        const subjects=database.collection('subjects');
+        const old=await subjects.findOne({_id:checked.id});
+        await subjects.updateOne({_id:checked.id},{$setOnInsert:{code:checked.subjectCode,name:checked.subjectName,department:checked.department,departmentId:checked.departmentId,scheme:checked.scheme,semester:checked.semester,credits:checked.credits,active:checked.active,createdAt:new Date()}},{upsert:true});
+        result={id:checked.id,accountCreated:!old};
+       }else if(job.type==='teaching'){
+        const checked=await teachingRow(database,row);
+        if(checked.existingClassId){
+         result={id:checked.existingClassId,offeringCreated:false,accountCreated:false,mappingErrors:[]};
+         let cursor=null;
+         if(checked.active)do{
+          guard();
+          const mapped=await service.dispatch(actor.uid,{action:'mapClass',...checked,cursor});
+          result.mappingErrors.push(...mapped.results.filter(r=>r.error));
+          cursor=mapped.nextCursor;
+         }while(cursor);
+        }else result=await service.dispatch(actor.uid,{action:'importOffering',row:checked});
+       }else if(job.type==='facultyAssignments'){
+        const employeeId=row.employeeId||await database.collection('users').findOne({email:row.teacherEmail}).then(u=>u?.facultyId);
+        const checked=await assignmentRow(database,{...row,employeeId});
+        result=await service.dispatch(actor.uid,{action:'importOffering',row:checked});
+       }else{
+        const action=job.type==='students'?'provision':job.type==='teachers'?'importTeacher':'importOffering';
+        result=await service.dispatch(actor.uid,{action,row,requestId:'college_'+id.slice(0,40)+'_'+index});
+       }
+       const {demoPassword,...safe}=result;
+       if(result.uid&&job.type==='students'){
+        const {syncOfficeSearchIndex}=await import('./office-search.js');
+        await syncOfficeSearchIndex(store,result.uid);
+       }
+       return {index,name:row.name||row.subjectName,identifier:row.usn||row.employeeId||row.subjectCode,...safe,error:result.mappingErrors?.length?'Some academic mappings failed; inspect the report.':''};
+      }catch(error){
+       return {index,name:row.name||row.subjectName,identifier:row.usn||row.employeeId||row.subjectCode,error:error.message};
+      }
+     },
+    });
+    guard();
+    const all=[...new Map([...job.results,...results].map(r=>[r.index,r])).values()].sort((a,b)=>a.index-b.index);
+    const state=end===job.rows.length?'complete':background?'importing':'validated';
+    if(state==='complete')await database.collection('superAdminAudit').updateOne({_id:'import_'+id+'_'+(job.retryRevision||0)},{$setOnInsert:{actorUid:actor.uid,actorRole:actor.role,departmentId:job.departmentId,action:job.type==='students'?'BULK_STUDENT_IMPORT':job.type==='teachers'?'BULK_FACULTY_IMPORT':job.type==='subjects'?'BULK_SUBJECT_IMPORT':'BULK_ASSIGNMENT_IMPORT',jobId:id,summary:job.rows.length+' rows; '+all.filter(r=>r.error).length+' errors.',timestamp:new Date()}},{upsert:true});
+    const finished=await jobs.updateOne({...owned,leaseUntil:{$gt:new Date()}},{$set:{offset:end,results:all,state,updatedAt:new Date()},...(state==='importing'?{}:release)});
+    if(!finished.matchedCount)fail('Import lease changed.','already-exists');
+    job={...job,offset:end,results:all,state};
+   }while(background&&job.state==='importing');
+   return job;
+  }catch(error){
+   await jobs.updateOne(owned,{...release,$set:{state:background?'interrupted':'validated',updatedAt:new Date()}});
+   throw error;
+  }finally{clearInterval(heartbeat);}
+ }
+
  app.post('/api/college-import/confirm',async(req,res)=>{
-  check(req.actor);const id=String(req.body.jobId||'');if(!/^[a-f0-9]{64}$/.test(id)||req.body.confirmation!==true)fail('Validate and confirm this CSV first.');let job=await jobs.findOne({_id:id});if(!job||job.actorUid!==req.actor.uid||(job.departmentId||null)!==(req.actor.managementDepartmentId||null))fail('Import belongs to another administrator/department.','permission-denied');if(job.state==='complete'&&req.body.retryFailed===true&&job.results.some(r=>r.error)){await jobs.updateOne({_id:id,state:'complete'},{$set:{state:'validated',offset:0},$inc:{retryRevision:1}});job=await jobs.findOne({_id:id});}if(job.state==='complete')return res.json(summary(job));
-  const owner=randomUUID(),lease=new Date(Date.now()+180000),locked=await jobs.findOneAndUpdate({_id:id,$or:[{leaseUntil:{$exists:false}},{leaseUntil:{$lt:new Date()}}]},{$set:{leaseUntil:lease,leaseOwner:owner,state:'importing'}},{returnDocument:'after'});if(!locked)fail('Import is already running. Wait for the current operation.','already-exists');job=locked;
-  let leaseLost=false;const heartbeat=setInterval(()=>{jobs.updateOne({_id:id,leaseOwner:owner},{$set:{leaseUntil:new Date(Date.now()+180000)}}).then(r=>{if(!r.matchedCount)leaseLost=true;}).catch(()=>{leaseLost=true;});},30000);heartbeat.unref();
-  try{const end=Math.min(job.offset+10,job.rows.length);const results=await runImportRows({start:job.offset,end,previous:job.results,checkpoint:async entry=>{if(leaseLost)fail('Import lease changed. Retry the saved operation.','already-exists');const saved=await jobs.updateOne({_id:id,leaseOwner:owner},[{$set:{results:{$concatArrays:[{$filter:{input:{$ifNull:['$results',[]]},as:'row',cond:{$ne:['$row.index',entry.index]}}},{$literal:[entry]}]},leaseUntil:{$literal:new Date(Date.now()+180000)},updatedAt:{$literal:new Date()}}}]);if(!saved.matchedCount)fail('Import lease changed. Retry the saved operation.','already-exists');},process:async index=>{const row=job.rows[index];try{
-    await scopedAdminInput(database,req.actor,{row});let result;
-    if(job.type==='subjects'){const checked=await subjectRow(database,row);const old=await database.collection('subjects').findOne({_id:checked.id});await database.collection('subjects').updateOne({_id:checked.id},{$setOnInsert:{code:checked.subjectCode,name:checked.subjectName,department:checked.department,departmentId:checked.departmentId,scheme:checked.scheme,semester:checked.semester,credits:checked.credits,active:checked.active,createdAt:new Date()}},{upsert:true});result={id:checked.id,accountCreated:!old};}
-    else if(job.type==='teaching'){const checked=await teachingRow(database,row);if(checked.existingClassId){result={id:checked.existingClassId,offeringCreated:false,accountCreated:false,mappingErrors:[]};let cursor=null;if(checked.active)do{const mapped=await service.dispatch(req.actor.uid,{action:'mapClass',...checked,cursor});result.mappingErrors.push(...mapped.results.filter(r=>r.error));cursor=mapped.nextCursor;}while(cursor);}else result=await service.dispatch(req.actor.uid,{action:'importOffering',row:checked});}
-    else if(job.type==='facultyAssignments'){const checked=await assignmentRow(database,{...row,employeeId:row.employeeId||await database.collection('users').findOne({email:row.teacherEmail}).then(u=>u?.facultyId)});result=await service.dispatch(req.actor.uid,{action:'importOffering',row:checked});}
-    else result=await service.dispatch(req.actor.uid,{action:job.type==='students'?'provision':job.type==='teachers'?'importTeacher':'importOffering',row,requestId:'college_'+id.slice(0,40)+'_'+index});
-    const {demoPassword,...safe}=result;if(result.uid&&job.type==='students'){const {syncOfficeSearchIndex}=await import('./office-search.js');await syncOfficeSearchIndex(store,result.uid);}return {index,name:row.name||row.subjectName,identifier:row.usn||row.employeeId||row.subjectCode,...safe,error:result.mappingErrors?.length?'Some academic mappings failed; inspect the report.':''};
-   }catch(error){return {index,name:row.name||row.subjectName,identifier:row.usn||row.employeeId||row.subjectCode,error:error.message};}}});
-   const all=[...new Map([...job.results,...results].map(r=>[r.index,r])).values()].sort((a,b)=>a.index-b.index),state=end===job.rows.length?'complete':'validated';const finished=await jobs.updateOne({_id:id,leaseOwner:owner},{$set:{offset:end,results:all,state,updatedAt:new Date()},$unset:{leaseUntil:'',leaseOwner:''}});if(!finished.matchedCount)fail('Import lease changed. Retry the saved operation.','already-exists');job={...job,offset:end,results:all,state};if(state==='complete')await database.collection('superAdminAudit').updateOne({_id:'import_'+id+'_'+(job.retryRevision||0)},{$setOnInsert:{actorUid:req.actor.uid,actorRole:req.actor.role,departmentId:job.departmentId,action:job.type==='students'?'BULK_STUDENT_IMPORT':job.type==='teachers'?'BULK_FACULTY_IMPORT':job.type==='subjects'?'BULK_SUBJECT_IMPORT':'BULK_ASSIGNMENT_IMPORT',jobId:id,summary:job.rows.length+' rows; '+all.filter(r=>r.error).length+' errors.',timestamp:new Date()}},{upsert:true});res.json(summary(job));
-  }catch(error){await jobs.updateOne({_id:id,leaseOwner:owner},{$unset:{leaseUntil:'',leaseOwner:''},$set:{state:'validated'}});throw error;}finally{clearInterval(heartbeat);}
+  check(req.actor);
+  if(req.body.confirmation!==true)fail('Validate and confirm this CSV first.');
+  let job=await ownedJob(req.actor,req.body.jobId);
+  const background=job.type==='teaching'&&req.body.background===true;
+  if(background)job=await teachingJob(req.actor,job.digest)||job;
+  const retry=job.state==='complete'&&req.body.retryFailed===true&&job.results.some(r=>r.error)
+   &&(!background||req.body.retryRevision===(job.retryRevision||0));
+  if(job.state==='complete'&&!retry)return res.json(background?status(job):summary(job));
+  if(background&&hasLease(job))return res.json(status(job));
+  const owner=randomUUID(),now=new Date();
+  const locked=await jobs.findOneAndUpdate(
+   {_id:job._id,state:job.state,...(retry?{retryRevision:job.retryRevision??{$exists:false}}:{}),$or:[{leaseUntil:{$exists:false}},{leaseUntil:{$lte:now}}]},
+   {$set:{leaseUntil:new Date(now.getTime()+leaseMs),leaseOwner:owner,state:background?'queued':'importing',updatedAt:now,...(retry?{offset:0}:{})},...(retry?{$inc:{retryRevision:1}}:{})},
+   {returnDocument:'after'},
+  );
+  if(!locked){
+   if(background)return res.json(status(await ownedJob(req.actor,job._id)));
+   fail('Import is already running. Wait for the current operation.','already-exists');
+  }
+  if(background){
+   res.status(202).json(status(locked));
+   void runJob(locked,req.actor,true).catch(error=>console.error('Teaching import interrupted',locked._id,error.code||error.name));
+   return;
+  }
+  res.json(summary(await runJob(locked,req.actor,false)));
  });
  app.get('/api/administration/mentors',async(req,res)=>{check(req.actor);const people=(await database.collection('users').find({role:{$in:['mentor','subject_faculty','hod']},...(req.actor.managementDepartmentId?{departmentId:req.actor.managementDepartmentId}:{})}).toArray()).filter(u=>isMentor(u)&&selectableFaculty(u)),counts=await database.collection('students').aggregate([{$match:{mentorId:{$in:people.map(u=>u._id)},accountStatus:{$nin:['inactive','deleted','deactivating','deleting','exited','exiting']}}},{$lookup:{from:'users',localField:'_id',foreignField:'_id',as:'profile'}},{$match:{'profile.0':{$exists:true}}},{$group:{_id:'$mentorId',count:{$sum:1}}}]).toArray();res.json({rows:people.map(u=>({uid:u._id,name:u.name,email:u.email,facultyId:u.facultyId,mentees:counts.find(c=>c._id===u._id)?.count||0}))});});
 }

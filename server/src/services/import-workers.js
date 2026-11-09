@@ -1,11 +1,12 @@
 // Each row retains its existing provisioning transaction and stable request ID.
 // Bound concurrent network work and persist every outcome before taking another row.
 export async function runImportRows({start,end,previous=[],process,checkpoint}){
- let cursor=start;const results=[];
+ let cursor=start,stopped=false;const results=[];
  const workers=Array.from({length:Math.min(3,end-start)},async()=>{
-  while(cursor<end){const index=cursor++,saved=previous.find(r=>r.index===index&&!r.error);
+  while(!stopped&&cursor<end){const index=cursor++,saved=previous.find(r=>r.index===index&&!r.error);
    if(saved){results.push(saved);continue;}
-   const outcome=await process(index);await checkpoint(outcome);results.push(outcome);
+   try{const outcome=await process(index);await checkpoint(outcome);results.push(outcome);}
+   catch(error){stopped=true;throw error;}
   }
  });
  const settled=await Promise.allSettled(workers),failed=settled.find(r=>r.status==='rejected');
