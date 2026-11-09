@@ -1940,3 +1940,13 @@ dialog.delete-review-cascade { width: min(94vw, 640px); }
 .delete-review .confirmation-row { display: flex; align-items: flex-start; gap: .6rem; margin-block: .85rem; }
 .delete-review .confirmation-row input { width: auto; flex: none; margin-top: .25em; }
 .delete-review .provision-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+
+/* Keep assignment filters compact while allowing the class table to scroll. */
+:is(#facultyTeachingAssignments,#subjectTeachingAssignments) [data-filters] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: .5rem .8rem;
+  align-items: end;
+}
+:is(#facultyTeachingAssignments,#subjectTeachingAssignments) [data-filters] > * { min-width: 0; }
+#facultyTeachingAssignments [data-results] article li { margin-block: .4rem; }

@@ -1279,3 +1279,78 @@ test('student CSV accepts optional AUID and rejects case-folded duplicates befor
    assert.equal(student.auid,expected);assert.match(profileHTML(student),new RegExp(expected||'Not provided'));
  }
 });
+
+test('teaching assignment management scopes both admins and preserves marks and clearance history',async()=>{
+ const dep='dept_assignment_fixture',other='dept_assignment_foreign',scheme='ASSIGNMENT-2022',path='/api/administration/teaching-assignments';
+ await database.collection('departments').insertMany([{_id:dep,code:'ASSIGN',codeKey:'assign',name:'ASSIGN',nameKey:'assign',status:'active',sections:['A','B']},{_id:other,code:'ASSIGNX',codeKey:'assignx',name:'ASSIGNX',nameKey:'assignx',status:'active'}]);
+ await database.collection('schemes').insertOne({_id:'scheme_assignment',code:scheme,codeKey:scheme.toLowerCase(),name:scheme,nameKey:scheme.toLowerCase(),status:'active',scope:'institution'});
+ for(const role of ['admin','subject_faculty','mentor','hod','office'])await database.collection('users').updateOne({_id:accounts[role].uid},{$set:{department:'ASSIGN',departmentId:dep,scope:'department'}});
+ const old=accounts.subject_faculty.uid,teacher=accounts.mentor.uid,subjectId='subject_assignment_fixture',components=[{id:'ia1',label:'Preserve this label',max:30}],semester=5,section='A';
+ await database.collection('subjects').insertOne({_id:subjectId,department:'ASSIGN',departmentId:dep,scheme,code:'ASSIGN501',name:'Assignment fixture',semester,credits:4,active:true});
+ const call=async(role,url,data)=>data?api(role,url,data):request(app).get(url).set('Authorization','Bearer '+await token(accounts[role].email));
+ assert.equal((await call('admin',path+'?departmentId='+other)).status,403);
+ assert.equal((await call('subject_faculty',path+'?departmentId='+dep)).status,403);
+ assert.equal((await call('super_admin',path+'?departmentId='+other)).status,200);
+ const add={operation:'add',departmentId:dep,subjectId,teacherId:old,semester,section};
+ assert.equal((await call('admin',path+'/preview',{...add,semester:6})).status,400);
+ const checked=await call('admin',path+'/preview',add);assert.equal(checked.status,200,JSON.stringify(checked.body));
+ const created=await call('admin',path+'/apply',{...add,confirmation:true,fingerprint:checked.body.fingerprint});assert.equal(created.status,200,JSON.stringify(created.body));
+ const changeEmpty={...add,operation:'edit',offeringId:created.body.id,section:'B'};
+ const emptyReview=await call('super_admin',path+'/preview',changeEmpty);assert.equal(emptyReview.status,200,JSON.stringify(emptyReview.body));
+ const emptyMoved=await call('super_admin',path+'/apply',{...changeEmpty,confirmation:true,fingerprint:emptyReview.body.fingerprint});assert.equal(emptyMoved.status,200,JSON.stringify(emptyMoved.body));
+ const remove={...add,operation:'remove',offeringId:emptyMoved.body.id};
+ const removeReview=await call('admin',path+'/preview',remove);assert.equal(removeReview.status,200,JSON.stringify(removeReview.body));
+ const removed=await call('admin',path+'/apply',{...remove,confirmation:true,fingerprint:removeReview.body.fingerprint});assert.equal(removed.status,200,JSON.stringify(removed.body));
+ assert.equal((await database.collection('offerings').findOne({_id:emptyMoved.body.id})).active,false);
+ const restored=await call('admin',path+'/apply',{...add,confirmation:true,fingerprint:checked.body.fingerprint});assert.equal(restored.status,200,JSON.stringify(restored.body));
+ const id=created.body.id,key='subject_'+id,uid='assignment-student',uid2='assignment-history-student',eId='assignment-enrollment';
+ await database.collection('offerings').updateOne({_id:id},{$set:{components,componentIds:['ia1']}});
+ await database.collection('students').insertMany([uid,uid2].map(_id=>({_id,department:'ASSIGN',departmentId:dep,scheme,semester,section,teacherIds:[old],offeringIds:[id]})));
+ await database.collection('enrollments').insertMany([{_id:eId,studentId:uid},{_id:'assignment-history-enrollment',studentId:uid2}].map(r=>({...r,offeringId:id,teacherId:old,active:true,section,semester,scheme,department:'ASSIGN',departmentId:dep})));
+ const marks={_id:eId,studentId:uid,offeringId:id,teacherId:old,scores:{ia1:21},updatedBy:old,updatedAt:new Date()};
+ await database.collection('marks').insertOne(marks);
+ const item={offeringId:id,approverId:old,teacherUid:old,approverType:'subject_faculty',subjectCode:'ASSIGN501',subjectIdentity:['ASSIGN501',old,5,'A','ASSIGN',scheme].join('|')};
+ const pending={_id:'assignment-pending',studentId:uid,departmentId:dep,approvalItems:{[key]:item},approvalStates:{[key]:'pending'},approverIds:[old],status:'pending_stage1',createdAt:new Date()};
+ const history={...pending,_id:'assignment-history',studentId:uid2,status:'issued',approvalStates:{[key]:'approved'}};
+ await database.collection('noDueRequests').insertMany([pending,history]);
+ const originalApproval={_id:history._id+'/'+key,requestId:history._id,...item,status:'approved',actedBy:old,actedAt:new Date()};
+ await database.collection('approvals').insertMany([{_id:pending._id+'/'+key,requestId:pending._id,...item,status:'pending'},originalApproval]);
+ await database.collection('clearancePlans').insertOne({_id:uid,items:{[key]:item},approverIds:[old],valid:true});
+ const edit={...add,operation:'edit',offeringId:id,teacherId:teacher};
+ assert.equal((await call('admin',path+'/preview',{...edit,section:'B'})).status,400);
+ assert.equal((await call('admin',path+'/preview',{...edit,operation:'remove'})).status,400);
+ const preview=await call('super_admin',path+'/preview',edit);assert.equal(preview.status,200,JSON.stringify(preview.body));
+ assert.equal(preview.body.pending,1);assert.equal(preview.body.enrollments,2);assert.equal(preview.body.marks,1);
+ assert.equal((await call('admin',path+'/apply',{...edit,confirmation:true,fingerprint:preview.body.fingerprint})).status,400);
+ const stale=await call('admin',path+'/apply',{...edit,confirmation:true,movePending:true,fingerprint:'0'.repeat(64)});assert.equal(stale.status,409);
+ const saved=await call('admin',path+'/apply',{...edit,confirmation:true,movePending:true,fingerprint:preview.body.fingerprint});assert.equal(saved.status,200,JSON.stringify(saved.body));
+ assert.equal(saved.body.id,id);assert.equal(saved.body.pendingMoved,1);
+ assert.deepEqual((await database.collection('offerings').findOne({_id:id})).components,components);
+ assert.deepEqual(await database.collection('marks').findOne({_id:eId}),{...marks,teacherId:teacher});
+ assert.equal(await database.collection('enrollments').countDocuments({offeringId:id,teacherId:teacher}),2);
+ assert.deepEqual(await database.collection('noDueRequests').findOne({_id:history._id}),history);
+ assert.deepEqual(await database.collection('approvals').findOne({_id:originalApproval._id}),originalApproval);
+ const updated=await database.collection('noDueRequests').findOne({_id:pending._id});
+ assert.deepEqual(updated,{...pending,approverIds:[teacher],approvalItems:{[key]:{...item,approverId:teacher,teacherUid:teacher,teacherName:'mentor',teacherEmail:accounts.mentor.email,subjectIdentity:item.subjectIdentity.replace(old,teacher)}}});
+ assert.ok(await database.collection('superAdminAudit').findOne({action:'TEACHING_ASSIGNMENT_REASSIGNED',targets:id,actorUid:accounts.admin.uid}));
+ const csv=await api('admin','/api/college-import/preview',{type:'teaching',requestId:'assignment-preview-csv',rows:[{department:'ASSIGN',scheme,semester,section,subjectCode:'ASSIGN501',subjectName:'Assignment fixture',employeeId:'mentor',credits:4,active:true,components}]});
+ assert.equal(csv.body.valid,1,JSON.stringify(csv.body));
+ for(const [role,width] of [['super_admin',1366],['admin',390]]){
+  const {page,context}=await browserLogin(role);
+  try{await page.setViewportSize({width,height:850});await page.evaluate(()=>location.hash='faculty-staff');
+   const panel=page.locator('#facultyTeachingAssignments');await panel.getByText('Teaching Assignments',{exact:true}).click();if(role==='super_admin')await panel.locator('[data-department]').selectOption(dep);
+   await panel.getByText('mentor',{exact:true}).waitFor();await panel.getByText('Edit Teaching Assignments (1)',{exact:true}).click();
+   await panel.locator('[data-results] li').filter({hasText:'ASSIGN501'}).waitFor();
+   await page.evaluate(()=>location.hash='subjects-teaching');
+   const subjects=page.locator('#subjectTeachingAssignments');await subjects.getByText('Subject Assignments',{exact:true}).click();if(role==='super_admin')await subjects.locator('[data-department]').selectOption(dep);
+   await subjects.locator('tbody tr').filter({hasText:'mentor'}).getByText('ASSIGN501',{exact:true}).waitFor();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
+   await subjects.locator('tbody tr').filter({hasText:'mentor'}).getByRole('button',{name:'Edit Assignment'}).click();const dialog=page.locator('dialog[open]');
+   assert.equal(await dialog.locator('select[name=semester]').inputValue(),'5');
+   assert.equal(await dialog.locator('select[name=teacherId]').inputValue(),teacher);
+   await dialog.locator('select[name=teacherId]').selectOption(old);await dialog.getByRole('button',{name:'Review changes'}).click();
+   const confirm=dialog.getByRole('button',{name:'Confirm assignment'});await confirm.waitFor();assert.equal(await confirm.isEnabled(),false);
+   await dialog.getByLabel('Move pending approvals to new faculty').check();assert.equal(await confirm.isEnabled(),true);
+   await dialog.getByRole('button',{name:'Close'}).click();
+  }finally{await context.close();}
+ }
+});
