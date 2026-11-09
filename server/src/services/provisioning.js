@@ -10,7 +10,9 @@ import {isMentor,isFaculty,hasRole} from '../../../js/capabilities.js';
 import {sectionMaster,studentSectionCodes} from './section-master.js';
 import {departmentCode} from '../../../js/department.js';
 import {isManager} from './roles.js';
-import {isInactive} from './account-removal.js';
+import {accountExit,isInactive} from './account-removal.js';
+import {authorizeAccountTarget} from './department-master.js';
+import {activeStudentRequests,resolveStudentImport,studentIdentityKey} from './student-import-reconciliation.js';
 import {createHash,randomBytes} from 'node:crypto';
 import {FieldValue,HttpsError} from './values.js';
 
@@ -87,13 +89,13 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     if(row.scope==='department'&&master){row.departmentId=master.id;if(master.creationDigest)row.strictDepartmentScope=true;}
     return row;
   }
-  async function matchingOfferings(s) {
+  async function matchingOfferings(s,repo=db) {
     // Legacy offerings omit scheme/department or store semester as a string.
     // An explicit department or scheme must still match; never cross sections.
     // The original saveOffering/seed path omitted active. Those offerings are
     // enabled by default, as they are in the seeded enrollments and dashboards.
     // Query semester first: active == true would discard the legacy records.
-    const found=await db.collection('offerings').where('semester','in',[Number(s.semester),String(s.semester)]).get();
+    const found=await repo.collection('offerings').where('semester','in',[Number(s.semester),String(s.semester)]).get();
     const candidates=found.docs.map(d=>({...d.data(),id:d.id})).filter(o=>
       (!s.strictDepartmentScope||o.departmentId===s.departmentId) && (o.active===undefined || o.active===true) &&
       text(o.section).toUpperCase()===text(s.section).toUpperCase() &&
@@ -189,6 +191,156 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     }
     return {row,warnings};
   }
+
+  async function studentImportPlan(input,options={},p){
+    p ||= await policy();
+    const original=normalize({...input,role:'student'},p);
+    const identity=await resolveStudentImport(db,auth,original,options);
+    if(!identity.uid){
+      const {row,warnings}=await validate(original,{p});
+      return {row,classification:'NEW',warnings};
+    }
+    const row=normalize({...identity.input,collegeEmail:original.collegeEmail,phone:original.phone},p);
+    row.collegeEmail=email(identity.input.collegeEmail);
+    row.phone=identity.input.phone;
+    row.mentorId=(await mentor(row)).uid;
+    const {profile,user,uid,open,warnings}=identity;
+    const placement=()=>Number(profile.semester)!==row.semester||text(profile.section).toUpperCase()!==row.section||text(profile.scheme)!==row.scheme;
+    if(open&&(placement()||profile.mentorId!==row.mentorId)){
+      Object.assign(row,{semester:Number(profile.semester),section:profile.section,scheme:profile.scheme,mentorId:profile.mentorId});
+      warnings.push('Placement and mentor changes are deferred while a clearance request is open.');
+    }
+    const academicChanged=placement()||profile.mentorId!==row.mentorId;
+    row.offerings=await matchingOfferings(row);
+    if(!row.offerings.length){
+      if(academicChanged)fail('Configure active teaching assignments before changing this student’s academic mapping.','failed-precondition');
+      warnings.push('No active offerings match this student’s class.');
+    }else await planFor(row,row.offerings);
+    const fields={name:row.name,email:row.collegeEmail,phone:row.phone,scheme:row.scheme};
+    const studentFields={...fields,semester:row.semester,section:row.section,mentorId:row.mentorId,...(row.auid?{auid:profile.auid||row.auid}:{})};
+    return {row,uid,user,profile,account:identity.account,fields,studentFields,academicChanged,
+      target:hash(JSON.stringify([uid,studentFields])),warnings,
+      classification:identity.inactive?'INACTIVE':'EXISTING',
+      changes:{mentor:profile.mentorId!==row.mentorId,section:text(profile.section).toUpperCase()!==row.section,placement:placement(),
+        email:email(user.email)!==row.collegeEmail,phone:(profile.phone||user.phone)!==row.phone,auid:!profile.auid&&!!row.auid,name:profile.name!==row.name,
+        academicDeferred:open&&warnings.some(w=>w.includes('deferred'))}};
+  }
+
+  async function previewStudentImport(caller,inputs,options){
+    await admin(caller);
+    const p=await policy(),rows=[];
+    for(const [index,input] of inputs.entries()){
+      try{
+        const plan=await studentImportPlan(input,options,p);
+        const {offerings,...row}=plan.row;
+        rows.push({index,row,status:plan.changes?.academicDeferred||!offerings?.length?'WARNING':'VALID',classification:plan.classification,warnings:plan.warnings,changes:plan.changes,
+          existingUid:plan.uid,target:plan.target,subjectsMapped:offerings?.length||0});
+      }catch(error){
+        const classification=error.code==='already-exists'?'CONFLICT':'ERROR';
+        rows.push({index,row:input,status:'ERROR',classification,error:error.message});
+      }
+    }
+    return {rows};
+  }
+
+  async function reconcileStudentImport(actor,input,options,expected,requestId){
+    await admin(actor.uid);
+    if(expected.classification==='NEW')return provision(actor.uid,input,requestId);
+    let plan=await studentImportPlan(input,options);
+    const verify=()=>{
+      if(plan.uid!==expected.uid||plan.target!==expected.target||plan.classification==='INACTIVE'&&expected.classification!=='INACTIVE'){
+        fail('Student identity or planned changes changed since preview. Validate the CSV again.','failed-precondition');
+      }
+    };
+    verify();
+    const {uid}=plan;
+    await authorizeAccountTarget(db.database,actor,{...plan.user,_id:uid});
+    const reactivated=expected.classification==='INACTIVE';
+    if(plan.classification==='INACTIVE'){
+      await accountExit({database:db.database,client:db.client,auth,actor,
+        input:{uid,action:'reactivate',kind:'student',confirmation:'REACTIVATE'},
+        restoreStudent:(store,id)=>createProvisioner({db:store,auth,demo}).restoreStudentMappings(id)});
+      plan=await studentImportPlan(input,options);
+      verify();
+    }
+    const {row,user,profile,fields,studentFields}=plan;
+    const from=email(user.email),to=row.collegeEmail;
+    const ref=db.doc('users/'+uid),studentRef=db.doc('students/'+uid);
+    const keys=[['email',to],['usn',row.usn],['loginId',row.usn],...(row.auid?[['auid',row.auid]]:[])];
+    const reserve=async tx=>{
+      let createdEmail=false;
+      for(const [kind,value] of keys){
+        const reservation=db.doc('uniqueIdentities/'+studentIdentityKey(kind,value));
+        const saved=await tx.get(reservation);
+        if(saved.exists&&saved.data().uid!==uid)fail('An institutional identity is reserved by another account.','already-exists');
+        if(!saved.exists){
+          tx.create(reservation,{uid,createdAt:stamp()});
+          if(kind==='email')createdEmail=true;
+        }
+      }
+      return createdEmail;
+    };
+    const guard=async tx=>{
+      const currentUser=(await tx.get(ref)).data(),current=(await tx.get(studentRef)).data();
+      if(!currentUser||currentUser.role!=='student'||!current||isInactive(currentUser)||isInactive(current)||
+        currentUser.departmentId!==user.departmentId||current.departmentId!==profile.departmentId||email(currentUser.email)!==from||
+        ['name','email','phone','usn','auid','mentorId','semester','section','scheme'].some(key=>current[key]!==profile[key])){
+        fail('Student changed while reconciling. Retry after reviewing the current profile.','failed-precondition');
+      }
+      const pending=currentUser.studentImportEmail;
+      if(pending&&(pending.from!==from||pending.to!==to))fail('Another email reconciliation is in progress.','failed-precondition');
+      if(plan.academicChanged){
+        const requests=await tx.get(db.collection('noDueRequests').where('studentId','==',uid).where('status','in',activeStudentRequests).limit(1));
+        if(!requests.empty)fail('A clearance request opened after preview. Validate the CSV again.','failed-precondition');
+      }
+      return currentUser;
+    };
+    if(from!==to){
+      await db.runTransaction(async tx=>{
+        const currentUser=await guard(tx);
+        const createdEmail=await reserve(tx);
+        if(!currentUser.studentImportEmail)tx.update(ref,{studentImportEmail:{from,to,createdEmail}});
+      });
+      if(email((await auth.getUser(uid)).email)!==to){
+        try{await auth.updateUser(uid,{email:to,emailVerified:false});}
+        catch(error){
+          if(error.code==='auth/email-already-exists')await db.runTransaction(async tx=>{
+            const current=(await tx.get(ref)).data(),pending=current?.studentImportEmail;
+            if(pending?.from!==from||pending.to!==to)return;
+            const reserved=db.doc('uniqueIdentities/'+studentIdentityKey('email',to));
+            if(pending.createdEmail&&(await tx.get(reserved)).data()?.uid===uid)tx.delete(reserved);
+            tx.update(ref,{studentImportEmail:null});
+          });
+          throw error;
+        }
+      }
+    }
+    await db.runTransaction(async tx=>{
+      await guard(tx);
+      await reserve(tx);
+      const repository=tx.store;
+      const userChanges=Object.fromEntries(Object.entries(fields).filter(([key,value])=>user[key]!==value));
+      const studentChanges=Object.fromEntries(Object.entries(studentFields).filter(([key,value])=>profile[key]!==value));
+      if(from!==to){
+        userChanges.studentImportEmail=null;
+        const old=db.doc('uniqueIdentities/'+studentIdentityKey('email',from));
+        if((await tx.get(old)).data()?.uid===uid)tx.delete(old);
+      }
+      if(Object.keys(userChanges).length)await repository.doc(ref.path).update({...userChanges,updatedAt:stamp()});
+      if(Object.keys(studentChanges).length)await repository.doc(studentRef.path).update({...studentChanges,updatedAt:stamp()});
+      if(plan.academicChanged||reactivated){
+        await mapStudent(uid,{...profile,...studentFields},undefined,{preserveExisting:true,reconcilePlacement:plan.changes.placement,repo:repository});
+      }
+      if(Object.keys(userChanges).length||Object.keys(studentChanges).length){
+        const auditId='student_import_'+hash(requestId+':'+uid);
+        tx.set(db.doc('superAdminAudit/'+auditId),{action:'STUDENT_IMPORT_RECONCILED',actorUid:actor.uid,target:uid,
+          departmentId:row.departmentId,fields:[...new Set([...Object.keys(studentChanges),...Object.keys(userChanges)])],timestamp:stamp()});
+      }
+    });
+    return {uid,auid:row.auid,accountCreated:false,accountUpdated:true,reactivated,mentorMapped:true,
+      subjectsMapped:row.offerings.length,activation:'unchanged'};
+  }
+
   async function previewAccounts(inputs) {
     if(!Array.isArray(inputs) || inputs.length<1 || inputs.length>100) fail('Preview 1â€“100 rows per chunk.');
     const p=await policy(),seen={collegeEmail:new Set(),usn:new Set(),facultyId:new Set(),auid:new Set()},result=[];
@@ -273,24 +425,25 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     // Do not reset credentials, send another activation, or rewrite mappings.
     return {uid,name:row.name,email:row.collegeEmail,employeeId:row.employeeId,role:row.role,accountCreated:false,accountUpdated:true,warnings:[],activation:'unchanged'};
   }
-  async function planFor(student,offerings) {
-    const config=await workflowFor(db,student);
+  async function planFor(student,offerings,repo=db) {
+    const config=await workflowFor(repo,student);
     if(!config) fail('Configure workflow assignments before enrolling students.');
     const services=requiredServices(config,student.semester);
     const items={};
     for(const type of services) items[type]={approverType:type,approverId:config[type],label:type.replaceAll('_',' '),subjectCode:null,offeringId:null};
     const requirements=[...services.map(role=>[config[role],role]),[student.mentorId,'mentor'],[config.hodId,'hod'],[config.officeId,'office'],...offerings.map(o=>[o.teacherId,'teaching'])];
-    const ids=[...new Set(requirements.map(([id])=>id).filter(Boolean))],users=new Map((await db.collection('users').where('__name__','in',ids).get()).docs.map(d=>[d.id,d.data()]));
+    const ids=[...new Set(requirements.map(([id])=>id).filter(Boolean))],users=new Map((await repo.collection('users').where('__name__','in',ids).get()).docs.map(d=>[d.id,d.data()]));
     for(const o of offerings.filter(o=>matchesStudent(student,o)))items['subject_'+o.id]=subjectItem(student.uid||'',student,o,users.get(o.teacherId)||{});
     for(const [id,role]of requirements){const user=users.get(id);if(role==='office'&&config.officeScopeVersion===2&&user?.scope!=='department')fail('Configure the department Office.');if(role==='office'&&user?.scope==='department'&&(!student.departmentId||user.departmentId!==student.departmentId))fail('Office belongs to another department.');if(!user||isInactive(user)||(role==='teaching'?!isFaculty(user):role==='mentor'?!isMentor(user):user.role!==role))fail('Invalid '+role+' workflow assignment.');}
     return {valid:true,workflowVersion:3,items,initialStates:Object.fromEntries(Object.keys(items).map(k=>[k,'pending'])),approverIds:[...new Set(Object.values(items).map(i=>i.approverId))],mentorId:student.mentorId,hodId:config.hodId,officeId:config.officeId,semester:student.semester,section:student.section,updatedAt:stamp()};
   }
-  async function mapStudent(uid,student,offerings,{preserveExisting=false}={}) {
+  async function mapStudent(uid,student,offerings,{preserveExisting=false,reconcilePlacement=false,repo=db}={}) {
+    const db=repo;
     if(isInactive(student)||isInactive((await db.doc(`users/${uid}`).get()).data()))fail('Inactive students cannot be mapped.');
     student={...student,uid};
-    offerings ||= await matchingOfferings(student);
+    offerings ||= await matchingOfferings(student,repo);
     if(!offerings.length) {await db.doc(`students/${uid}/clearance/plan`).set({valid:false},{merge:true});return 0;}
-    const plan=await planFor(student,offerings),batch=db.batch([`users/${uid}`,`students/${uid}`]);
+    const plan=await planFor(student,offerings,repo),batch=db.batch([`users/${uid}`,`students/${uid}`]);
     // Include pre-existing enrollments when preparing a plan; never silently omit them.
     const enrolled=await db.collection('enrollments').where('studentId','==',uid).get();
     if(preserveExisting){const prior=(await db.doc('students/'+uid+'/clearance/plan').get()).data(),active=enrolled.docs.filter(e=>e.data().active===true),fields=['valid','workflowVersion','items','initialStates','approverIds','mentorId','hodId','officeId','semester','section'];if(prior&&active.length===offerings.length&&offerings.every(o=>active.filter(e=>e.data().offeringId===o.id&&e.data().teacherId===o.teacherId&&e.data().mentorId===student.mentorId).length===1)&&offerings.every(o=>student.offeringIds?.includes(o.id)&&student.teacherIds?.includes(o.teacherId))&&fields.every(field=>JSON.stringify(prior[field])===JSON.stringify(plan[field])))return offerings.length;}
@@ -308,6 +461,9 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     for(const enrollment of enrolled.docs) {
       if(enrollment.data().active!==true) continue;
       const o=(await db.doc(`offerings/${enrollment.data().offeringId}`).get()).data();
+      if(reconcilePlacement&&!selected.has(enrollment.data().offeringId)&&o&&!matchesStudent(student,o)){
+        batch.set(enrollment.ref,{active:false},{merge:true});continue;
+      }
       if(!o || Number(o.semester)!==Number(student.semester) || text(o.section).toUpperCase()!==text(student.section).toUpperCase()) fail('Existing enrollment needs explicit administrative review.');
       const specificity=Number(Boolean(text(o.department)))+Number(Boolean(text(o.scheme)));
       if(!preserveExisting && selectedSpecificity===2 && !selected.has(enrollment.data().offeringId) && specificity<selectedSpecificity &&
@@ -321,7 +477,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     }
     if(merged.size>30) fail('At most 30 active subjects per student are supported.');
     batch.set(db.doc(`students/${uid}`),{offeringIds:[...merged.keys()],teacherIds:[...new Set([...merged.values()].map(o=>o.teacherId))]},{merge:true});
-    batch.set(db.doc(`students/${uid}/clearance/plan`),merged.size===offerings.length?plan:await planFor(student,[...merged.values()]));
+    batch.set(db.doc(`students/${uid}/clearance/plan`),merged.size===offerings.length?plan:await planFor(student,[...merged.values()],repo));
     await batch.commit();return offerings.length;
   }
   async function activation(uid,p) {
@@ -611,5 +767,5 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     if(result.accountCreated)await db.runTransaction(async tx=>{const ref=db.doc('accountExitEvents/super_admin_bootstrap_'+result.uid);if(!(await tx.get(ref)).exists)tx.create(ref,{action:'super_admin_bootstrap',actorId:caller,targetUid:result.uid,at:stamp()});});
     return result;
   }
-  return {dispatch,restoreStudentMappings,bootstrapSuperAdmin};
+  return {dispatch,previewStudentImport,reconcileStudentImport,restoreStudentMappings,bootstrapSuperAdmin};
 }

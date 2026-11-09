@@ -1580,3 +1580,122 @@ test('20-row teaching CSV resumes its checkpoint and completes in the background
   if(policy)await database.collection('institutionPolicy').replaceOne({_id:'institution'},policy);
  }
 });
+
+
+test('student CSV reconciles scoped identities and preserves academic and Firebase history',async()=>{
+ const did='student-reconcile-test',department='STREC',scheme='2092';
+ const dep={_id:did,code:department,codeKey:department.toLowerCase(),name:'Student Reconcile Test',nameKey:'student reconcile test',status:'active',sections:['A','B']};
+ await database.collection('departments').insertOne(dep);
+ await database.collection('schemes').insertOne({_id:'student-reconcile-scheme',code:scheme,codeKey:scheme,name:'Reconcile scheme',nameKey:'reconcile scheme',scope:'institution',status:'active'});
+ const person=async(key,role,fields={})=>{
+  const email='student-reconcile-'+key+'@demo.test';
+  const identity=await auth.createUser({email,password:'DemoPassword123!',disabled:fields.accountStatus==='inactive'});
+  const profile={name:key,email,role,department,departmentId:did,scope:'department',...fields};
+  await store.doc('users/'+identity.uid).set(profile);
+  return {uid:identity.uid,email,profile};
+ };
+ const admin=await person('admin','admin'),mentorA=await person('mentor-a','mentor',{facultyId:'STREC-MA'}),mentorB=await person('mentor-b','mentor',{facultyId:'STREC-MB'});
+ const hod=await person('hod','hod'),office=await person('office','office');
+ await database.collection('departments').updateOne({_id:did},{$set:{adminId:admin.uid,hodId:hod.uid,officeId:office.uid}});
+ await store.doc('departmentWorkflows/'+did).set({hodId:hod.uid,officeId:office.uid,library:accounts.library.uid,accounts:accounts.accounts.uid,sports:accounts.sports.uid});
+ const policy=await database.collection('institutionPolicy').findOne({_id:'institution'});
+ await database.collection('institutionPolicy').updateOne({_id:'institution'},{$set:{allowedDomains:['demo.test','college.edu'],sections:['A','B'],sectionRecords:[]}});
+ const makeStudent=async(key,usn,fields={})=>{
+  const student=await person(key,'student',{phone:'9876543210',...fields});
+  await store.doc('students/'+student.uid).set({...student.profile,uid:student.uid,usn,semester:5,section:'A',scheme,mentorId:mentorA.uid});
+  return student;
+ };
+ const active=await makeStudent('active','STREC100'),inactive=await makeStudent('inactive','STREC101',{accountStatus:'inactive',authDisabled:true}),protectedStudent=await makeStudent('protected','STREC102');
+ const oldReal='student-reconcile-authoritative@college.edu';
+ await auth.updateUser(active.uid,{email:oldReal,emailVerified:true});
+ for(const collection of ['users','students'])await database.collection(collection).updateOne({_id:active.uid},{$set:{email:oldReal}});
+ const component={id:'ia1',label:'IA1',max:30};
+ for(const section of ['A','B'])await store.doc('offerings/student-reconcile-'+section).set({
+  teacherId:mentorA.uid,subjectId:'student-reconcile-subject',subjectName:'Fixture Subject',subjectCode:'STREC501',department,departmentId:did,semester:5,section,scheme,active:true,components:[component],
+ });
+ await store.doc('subjects/student-reconcile-subject').set({code:'STREC501',name:'Fixture Subject',department,departmentId:did,scheme,semester:5});
+ const enrollmentId='student-reconcile-original-enrollment';
+ await store.doc('enrollments/'+enrollmentId).set({studentId:active.uid,offeringId:'student-reconcile-A',teacherId:mentorA.uid,mentorId:mentorA.uid,active:true,department,semester:5,section:'A',scheme});
+ await store.doc('marks/student-reconcile-history').set({studentId:active.uid,offeringId:'student-reconcile-A',scores:{ia1:24}});
+ await store.doc('noDueRequests/student-reconcile-protected').set({studentId:protectedStudent.uid,status:'pending_stage1',mentorId:mentorA.uid,approvalItems:{}});
+ const oldMarks=await database.collection('marks').findOne({_id:'student-reconcile-history'});
+ const oldRequest=await database.collection('noDueRequests').findOne({_id:'student-reconcile-protected'});
+ const row=(usn,seq)=>({name:'Professor Name '+seq,usn,auid:'STRECA'+seq,collegeEmail:'generated-reconcile-'+seq+'@demo.test',
+  phone:'9000000000',department,scheme,semester:5,section:'B',mentorEmployeeId:'STREC-MB'});
+ const rows=[row('STREC100',100),row('STREC101',101),row('STREC102',102),row('STREC103',103)];
+ const bearer={super:await token(accounts.super_admin.email),dept:await token(admin.email)};
+ const call=(role,path,body)=>request(app).post('/api/college-import/'+path).set('Authorization','Bearer '+bearer[role]).set('X-Department-Id',did).send(body);
+ const preview=(role,input=rows,keepExistingPlacement=true)=>call(role,'preview',{type:'students',rows:input,reconcileStudents:true,keepExistingPlacement,background:true,requestId:crypto.randomUUID()});
+ const finish=async(role,id,extra={})=>{
+  const confirm=await call(role,'confirm',{jobId:id,confirmation:true,background:true,...extra});
+  assert.ok([200,202].includes(confirm.status),JSON.stringify(confirm.body));
+  for(let i=0;i<100;i++){
+   const res=await request(app).get('/api/college-import/jobs/'+id).set('Authorization','Bearer '+bearer[role]).set('X-Department-Id',did);
+   assert.equal(res.status,200,JSON.stringify(res.body));
+   if(['completed','failed','interrupted'].includes(res.body.status))return res.body;
+   await new Promise(resolve=>setTimeout(resolve,30));
+  }
+  assert.fail('Student import did not finish.');
+ };
+ try{
+  const baseline=await database.collection('students').find({departmentId:did}).sort({_id:1}).toArray();
+  for(const role of ['super','dept']){
+   const checked=await preview(role);
+   assert.equal(checked.body.errors,0,JSON.stringify(checked.body));
+   assert.deepEqual(checked.body.studentSummary,{new:1,existing:2,inactive:1,conflicts:0,mentorChanges:2,sectionChanges:0,deferred:1});
+   assert.equal(checked.body.rows[0].row.collegeEmail,oldReal);
+  }
+  assert.deepEqual(await database.collection('students').find({departmentId:did}).sort({_id:1}).toArray(),baseline);
+
+  const ui=await browserLogin('super_admin');
+  try{
+   const page=ui.page;
+   await page.setViewportSize({width:390,height:844});
+   await page.evaluate(({uid,id})=>sessionStorage.setItem('department-context:'+uid,id),{uid:accounts.super_admin.uid,id:did});
+   await page.goto('http://127.0.0.1:5051/super-admin-dashboard.html#students');
+   await page.locator('body.workspace-ready').waitFor();
+   const header=['name','usn','auid','collegeEmail','phone','department','scheme','semester','section','mentorEmployeeId'];
+   await page.locator('#importFile').setInputFiles({name:'student-reconcile.csv',mimeType:'text/csv',buffer:Buffer.from(csvOf(rows,header))});
+   await page.locator('#previewBtn').click();
+   await page.locator('#importPreview tbody tr').first().waitFor();
+   assert.match(await page.locator('#importPreview').innerText(),/Existing: 2.*Inactive: 1/s);
+   const layout=await page.locator('#importPreview .table-scroll').evaluate(el=>({
+    horizontal:el.scrollWidth>el.clientWidth,
+    status:getComputedStyle(el.querySelector('tbody td:nth-child(5)')).whiteSpace,
+    details:getComputedStyle(el.querySelector('tbody td:nth-child(6)')).whiteSpace,
+   }));
+   assert.deepEqual(layout,{horizontal:true,status:'nowrap',details:'normal'});
+   await page.locator('#acceptWarnings').check();
+   assert.equal(await page.locator('#importBtn').isDisabled(),true);
+   await page.locator('#reactivateStudents').check();
+   assert.equal(await page.locator('#importBtn').isEnabled(),true);
+  }finally{await ui.context.close();}
+
+  const conflict=await preview('dept',[{...rows[0],collegeEmail:inactive.email}]);
+  assert.equal(conflict.body.studentSummary.conflicts,1);assert.equal(conflict.body.jobId,null);
+  const checked=await preview('dept');
+  assert.equal((await call('dept','confirm',{jobId:checked.body.jobId,confirmation:true,background:true})).status,400);
+  const done=await finish('dept',checked.body.jobId,{reactivateStudents:true});
+  assert.equal(done.status,'completed',JSON.stringify(done));
+  assert.equal(done.created,1);assert.equal(done.existing,3);
+  assert.equal(await database.collection('students').countDocuments({departmentId:did}),4);
+  assert.equal((await auth.getUser(inactive.uid)).disabled,false);
+  const current=await database.collection('students').findOne({_id:active.uid});
+  assert.equal(current.email,oldReal);assert.equal(current.phone,'9876543210');assert.equal(current.section,'A');assert.equal(current.mentorId,mentorB.uid);
+  assert.equal(current.auid,'STRECA100');assert.equal((await auth.getUser(active.uid)).emailVerified,true);
+  assert.deepEqual(await database.collection('noDueRequests').findOne({_id:oldRequest._id}),oldRequest);
+  assert.equal((await database.collection('students').findOne({_id:protectedStudent.uid})).mentorId,mentorA.uid);
+  const replay=await preview('dept');assert.equal(replay.body.jobId,checked.body.jobId);
+  assert.equal((await finish('dept',replay.body.jobId)).status,'completed');
+  const changedEmail='student-reconcile-approved@college.edu';
+  const moved=await preview('super',[{...rows[0],collegeEmail:changedEmail,phone:'9876543210'}],false);
+  assert.equal(moved.body.studentSummary.sectionChanges,1,JSON.stringify(moved.body));
+  assert.equal((await finish('super',moved.body.jobId)).status,'completed');
+  assert.equal((await auth.getUser(active.uid)).email,changedEmail);
+  assert.equal((await database.collection('students').findOne({_id:active.uid})).section,'B');
+  assert.equal((await database.collection('enrollments').findOne({_id:enrollmentId})).active,false);
+  assert.equal(await database.collection('enrollments').countDocuments({studentId:active.uid,active:true}),1);
+  assert.deepEqual(await database.collection('marks').findOne({_id:oldMarks._id}),oldMarks);
+  assert.ok((await token(changedEmail)).length);
+ }finally{if(policy)await database.collection('institutionPolicy').replaceOne({_id:'institution'},policy);}
+});
