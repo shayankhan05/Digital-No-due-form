@@ -1492,7 +1492,7 @@ test('20-row teaching CSV resumes its checkpoint and completes in the background
   await database.collection('users').insertOne({_id:uid,email,facultyId:employeeId,name:employeeId,role:'subject_faculty',department:code,departmentId:dept._id});
  }
  const policy=await database.collection('institutionPolicy').findOne({_id:'institution'});
- await database.collection('institutionPolicy').updateOne({_id:'institution'},{$set:{sections:dept.sections}});
+ await database.collection('institutionPolicy').updateOne({_id:'institution'},{$set:{sections:dept.sections,sectionRecords:dept.sections.map(code=>({code,name:code,status:'active'}))}});
  const service=createProvisioner({db:store,auth,demo:true});
  const run=express();run.use(express.json(),(req,res,next)=>{req.actor=actor;next();});
  let release;
