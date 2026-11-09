@@ -1298,10 +1298,14 @@ test('teaching assignment management scopes both admins and preserves marks and 
  const changeEmpty={...add,operation:'edit',offeringId:created.body.id,section:'B'};
  const emptyReview=await call('super_admin',path+'/preview',changeEmpty);assert.equal(emptyReview.status,200,JSON.stringify(emptyReview.body));
  const emptyMoved=await call('super_admin',path+'/apply',{...changeEmpty,confirmation:true,fingerprint:emptyReview.body.fingerprint});assert.equal(emptyMoved.status,200,JSON.stringify(emptyMoved.body));
+ const deactivate={...add,operation:'deactivate',offeringId:emptyMoved.body.id};
+ const deactivationReview=await call('admin',path+'/preview',deactivate);assert.equal(deactivationReview.status,200,JSON.stringify(deactivationReview.body));
+ assert.equal((await call('admin',path+'/apply',{...deactivate,confirmation:true,fingerprint:deactivationReview.body.fingerprint})).status,200);
+ assert.equal((await database.collection('offerings').findOne({_id:emptyMoved.body.id})).active,false);
  const remove={...add,operation:'remove',offeringId:emptyMoved.body.id};
  const removeReview=await call('admin',path+'/preview',remove);assert.equal(removeReview.status,200,JSON.stringify(removeReview.body));
  const removed=await call('admin',path+'/apply',{...remove,confirmation:true,fingerprint:removeReview.body.fingerprint});assert.equal(removed.status,200,JSON.stringify(removed.body));
- assert.equal((await database.collection('offerings').findOne({_id:emptyMoved.body.id})).active,false);
+ assert.equal(await database.collection('offerings').findOne({_id:emptyMoved.body.id}),null);
  const restored=await call('admin',path+'/apply',{...add,confirmation:true,fingerprint:checked.body.fingerprint});assert.equal(restored.status,200,JSON.stringify(restored.body));
  const id=created.body.id,key='subject_'+id,uid='assignment-student',uid2='assignment-history-student',eId='assignment-enrollment';
  await database.collection('offerings').updateOne({_id:id},{$set:{components,componentIds:['ia1']}});
@@ -1317,8 +1321,11 @@ test('teaching assignment management scopes both admins and preserves marks and 
  await database.collection('approvals').insertMany([{_id:pending._id+'/'+key,requestId:pending._id,...item,status:'pending'},originalApproval]);
  await database.collection('clearancePlans').insertOne({_id:uid,items:{[key]:item},approverIds:[old],valid:true});
  const edit={...add,operation:'edit',offeringId:id,teacherId:teacher};
- assert.equal((await call('admin',path+'/preview',{...edit,section:'B'})).status,400);
- assert.equal((await call('admin',path+'/preview',{...edit,operation:'remove'})).status,400);
+ assert.ok((await call('admin',path+'/preview',{...edit,section:'B'})).body.blocked);
+ for(const input of [{...edit,operation:'remove'},{...edit,operation:'deactivate'},{departmentId:dep,subjectId,operation:'subject-remove'}]){
+  const blocked=await call('admin',path+'/preview',input);assert.equal(blocked.status,200,JSON.stringify(blocked.body));assert.ok(blocked.body.blocked);
+  assert.equal((await call('admin',path+'/apply',{...input,confirmation:true,fingerprint:blocked.body.fingerprint})).status,400);
+ }
  const preview=await call('super_admin',path+'/preview',edit);assert.equal(preview.status,200,JSON.stringify(preview.body));
  assert.equal(preview.body.pending,1);assert.equal(preview.body.enrollments,2);assert.equal(preview.body.marks,1);
  assert.equal((await call('admin',path+'/apply',{...edit,confirmation:true,fingerprint:preview.body.fingerprint})).status,400);
@@ -1335,6 +1342,15 @@ test('teaching assignment management scopes both admins and preserves marks and 
  assert.ok(await database.collection('superAdminAudit').findOne({action:'TEACHING_ASSIGNMENT_REASSIGNED',targets:id,actorUid:accounts.admin.uid}));
  const csv=await api('admin','/api/college-import/preview',{type:'teaching',requestId:'assignment-preview-csv',rows:[{department:'ASSIGN',scheme,semester,section,subjectCode:'ASSIGN501',subjectName:'Assignment fixture',employeeId:'mentor',credits:4,active:true,components}]});
  assert.equal(csv.body.valid,1,JSON.stringify(csv.body));
+ const unusedId='subject_assignment_unused';
+ await database.collection('subjects').insertOne({_id:unusedId,department:'ASSIGN',departmentId:dep,scheme,code:'ASSIGN999',name:'Unused fixture',semester:5,active:true});
+ for(const operation of ['subject-deactivate','subject-remove']){
+  const input={operation,departmentId:dep,subjectId:unusedId},reviewed=await call('admin',path+'/preview',input);
+  assert.equal(reviewed.status,200,JSON.stringify(reviewed.body));assert.equal(reviewed.body.blocked,'');
+  const changed=await call('admin',path+'/apply',{...input,confirmation:true,fingerprint:reviewed.body.fingerprint});assert.equal(changed.status,200,JSON.stringify(changed.body));
+  assert.ok(await database.collection('superAdminAudit').findOne({targets:unusedId,action:operation==='subject-remove'?'SUBJECT_MASTER_REMOVED':'SUBJECT_MASTER_DEACTIVATED'}));
+ }
+ assert.equal(await database.collection('subjects').findOne({_id:unusedId}),null);
  for(const [role,width] of [['super_admin',1366],['admin',390]]){
   const {page,context}=await browserLogin(role);
   try{await page.setViewportSize({width,height:850});await page.evaluate(()=>location.hash='faculty-staff');

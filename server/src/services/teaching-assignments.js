@@ -58,18 +58,28 @@ function approvers(before,after,ids){
 async function plan(db,actor,input,session){
  const {dep,user}=await context(db,actor,input.departmentId,session),scope=classScope(dep);
  const operation=input.operation;
- if(!['add','edit','remove'].includes(operation))fail('Choose a supported assignment action.');
+ if(!['add','edit','deactivate','remove','subject-deactivate','subject-remove'].includes(operation))fail('Choose a supported assignment action.');
+ if(operation.startsWith('subject-')){
+  const subject=await db.collection('subjects').findOne({_id:identifier(input.subjectId)?input.subjectId:null,...scope},{session});
+  if(!subject||departmentCode(subject.department)!==dep.code)fail('Subject not found in this department.','permission-denied');
+  const linked=await read(db,'offerings',{$or:[{subjectId:subject._id},{department:dep.code,scheme:subject.scheme,subjectCode:subject.code}]},session);
+  const active=linked.filter(o=>o.active!==false).length;
+  const history=await references(db,session,subject._id,subject);
+  const blocked=operation==='subject-remove'&&(linked.length||history)?'This subject is used by '+active+' active offering(s), '+linked.length+' total offering(s), and '+history+' protected reference(s). Deactivate the subject instead.':'';
+  const fingerprint=hash(EJSON.stringify({operation,subject,linked,history},{relaxed:false}));
+  return {dep,user,subject,summary:{operation,fingerprint,blocked,linked:linked.length,activeOfferings:active,history,previous:{code:subject.code,name:subject.name,scheme:subject.scheme}}};
+ }
  const old=operation==='add'?null:await db.collection('offerings').findOne({_id:identifier(input.offeringId)?input.offeringId:null,...scope},{session});
  if(operation!=='add'&&!old)fail('Assignment not found in this department.','permission-denied');
  if(old&&departmentCode(old.department)!==dep.code)fail('Assignment department does not match.','permission-denied');
- if(operation==='remove'&&old.active===false)fail('This assignment is already inactive.');
+ if(operation==='deactivate'&&old.active===false)fail('This assignment is already inactive.');
  let teacher,subject,next,relocate=false;
- if(operation==='remove')next={...old,active:false};
+ if(['remove','deactivate'].includes(operation))next={...old,active:false};
  else{
   const options=await catalog(db,dep,session),semester=assertSemester(input.semester),section=input.section;
   subject=options.subjects.find(s=>s._id===input.subjectId);
   teacher=options.faculty.find(f=>f._id===input.teacherId);
-  if(!subject||!teacher||typeof section!=='string'||!options.sections.includes(section))fail('Choose an active subject, section, and eligible teacher in this department.');
+  if(!subject||input.scheme!==undefined&&String(subject.scheme)!==input.scheme||!teacher||typeof section!=='string'||!options.sections.includes(section))fail('Choose an active subject, section, and eligible teacher in this department.');
   if(subject.semester!=null&&Number(subject.semester)!==semester)fail('Choose the semester configured for this subject.');
   const related=await read(db,'offerings',{...scope,subjectCode:subject.code,scheme:subject.scheme},session);
   if(subject.semester==null&&related.some(o=>Number(o.semester)!==semester))fail('Choose the semester already used for this subject.');
@@ -81,8 +91,10 @@ async function plan(db,actor,input,session){
   const components=old?.components??defaultComponents;
   next=old&&!relocate?{...old,teacherId:teacher._id}:{...(old||{}),_id:id,department:dep.code,departmentId:dep._id,subjectId:subject._id,subjectCode:subject.code,subjectName:subject.name,scheme:subject.scheme,semester,section,teacherId:teacher._id,credits:subject.credits??null,components,componentIds:old?.componentIds??components.map(c=>c.id),active:old?old.active!==false:true};
  }
- const changedTeacher=!!old&&operation!=='remove'&&old.teacherId!==next.teacherId;
- if(operation==='edit'&&!relocate&&!changedTeacher)fail('Choose a change to review.');
+ if(operation==='edit'&&typeof input.active==='boolean')next.active=input.active;
+ const changedTeacher=!!old&&!['remove','deactivate'].includes(operation)&&old.teacherId!==next.teacherId;
+ if(operation==='edit'&&!relocate&&!changedTeacher&&(old.active!==false)===next.active)fail('Choose a change to review.');
+ let blocked='',history=0;
  const dependents={enrollments:[],marks:[],assignments:[],requests:[],approvals:[],plans:[],students:[],notifications:[]},moves=[];
  if(old){
   for(const name of ['enrollments','marks','assignments','approvals','notifications'])dependents[name]=await read(db,name,{offeringId:old._id},session);
@@ -91,12 +103,10 @@ async function plan(db,actor,input,session){
   const studentIds=unique(dependents.enrollments.map(e=>e.studentId));
   dependents.students=await read(db,'students',{$or:[{_id:{$in:studentIds}},{offeringIds:old._id}]},session);
   if(operation==='remove'||relocate){
-   if(Object.values(dependents).some(list=>list.length))fail('This class has enrollments, marks, or workflow records. Keep the class and reassign its teacher instead.');
-   // Workflow history blocks relocation. Assignment audit entries already retain before/after snapshots.
-   for(const name of ['noDueRequests','clearancePlans','workflowOverrides','presentationWorkflowArchives','hallTickets']){
-    for await(const record of db.collection(name).find({},{session}))if(EJSON.stringify(record).includes(JSON.stringify(old._id)))fail('This class is referenced by retained history and cannot be moved or removed.');
-   }
+   history=await references(db,session,old._id);
+   if(history||Object.values(dependents).some(list=>list.length))blocked='This class has protected dependencies. Keep it or review deactivation instead.';
   }
+  if(old.active!==false&&next.active===false&&dependents.requests.some(r=>!terminal.includes(r.status)))blocked='Resolve active clearance requests before deactivating this offering.';
   if(changedTeacher){
    if(dependents.enrollments.some(e=>e.active===true&&e.teacherId!==old.teacherId))fail('An active enrollment has an inconsistent teacher. Repair its mapping first.');
    if(dependents.marks.some(m=>!dependents.enrollments.some(e=>e._id===m._id&&e.studentId===m.studentId)))fail('Marks are not linked to a matching enrollment. Repair the roster first.');
@@ -117,12 +127,28 @@ async function plan(db,actor,input,session){
   }
  }
  const previousTeacher=old?await db.collection('users').findOne({_id:old.teacherId},{session}):null;
- const cohort=operation==='add'||relocate&&next.active?await read(db,'students',{...scope,scheme:next.scheme,semester:{$in:[next.semester,String(next.semester)]},section:next.section},session):[];
+ const cohort=operation==='add'||next.active&&(relocate||old?.active===false)?await read(db,'students',{...scope,scheme:next.scheme,semester:{$in:[next.semester,String(next.semester)]},section:next.section},session):[];
  const affected=unique(dependents.enrollments.map(e=>e.studentId));
  const roster=changedTeacher?await read(db,'enrollments',{studentId:{$in:affected},active:true},session):[];
- const fingerprint=hash(EJSON.stringify({old,next,teacher:teacher&&facultyView(teacher),dependents,cohort,roster},{relaxed:false}));
- const summary={operation,previous:old&&{code:old.subjectCode,name:old.subjectName,semester:old.semester,section:old.section,teacher:previousTeacher?.name||'Unassigned'},next:{code:next.subjectCode,name:next.subjectName,semester:next.semester,section:next.section,teacher:teacher?.name||previousTeacher?.name||'Unassigned'},enrollments:dependents.enrollments.length,marks:dependents.marks.length,pending:moves.length,completed:dependents.approvals.filter(a=>a.status!=='pending').length,matchingStudents:cohort.filter(s=>!isInactive(s)).length,fingerprint};
+ const fingerprint=hash(EJSON.stringify({old,next,teacher:teacher&&facultyView(teacher),dependents,cohort,roster,history,blocked},{relaxed:false}));
+ const summary={operation,blocked,history,assessments:old?.components?.length||0,active:next.active,previous:old&&{code:old.subjectCode,name:old.subjectName,semester:old.semester,section:old.section,teacher:previousTeacher?.name||'Unassigned'},next:{code:next.subjectCode,name:next.subjectName,semester:next.semester,section:next.section,teacher:teacher?.name||previousTeacher?.name||'Unassigned'},enrollments:dependents.enrollments.length,marks:dependents.marks.length,pending:operation==='edit'?moves.length:dependents.approvals.filter(a=>a.status==='pending'&&dependents.requests.some(r=>r._id===a.requestId&&!terminal.includes(r.status))).length,completed:dependents.approvals.filter(a=>a.status!=='pending').length,matchingStudents:cohort.filter(s=>!isInactive(s)).length,fingerprint};
  return {dep,user,old,next,teacher,relocate,changedTeacher,dependents,moves,roster,affected,summary};
+}
+
+async function references(db,session,id,subject){
+ const legacy=value=>value&&typeof value==='object'&&!(value instanceof Date)&&(
+  subject&&!value.subjectId&&value.subjectCode===subject.code&&
+  (!value.scheme||String(value.scheme)===String(subject.scheme))&&
+  (!value.department||departmentCode(value.department)===departmentCode(subject.department))||
+  Object.values(value).some(legacy));
+ let count=0;
+ for(const name of ['students','assignments','enrollments','marks','approvals','notifications','noDueRequests','clearancePlans','workflowOverrides','presentationWorkflowArchives','hallTickets']){
+  for await(const row of db.collection(name).find({},{session})){
+   const text=EJSON.stringify(row);
+   if(text.includes(id)||subject&&legacy(row))count++;
+  }
+ }
+ return count;
 }
 
 export function teachingAssignmentRoutes(app,{database,client,auth,provisionerOptions}){
@@ -130,9 +156,10 @@ export function teachingAssignmentRoutes(app,{database,client,auth,provisionerOp
  app.get(path,async(req,res)=>{
   const {dep}=await context(database,req.actor,req.query.departmentId),scope=classScope(dep);
   const options=await catalog(database,dep),offerings=await read(database,'offerings',scope);
+  const masters=await read(database,'subjects',scope);
   const staff=await read(database,'users',scope),staffById=new Map(staff.map(u=>[u._id,u]));
   const stats=await database.collection('enrollments').aggregate([{$match:{active:true,offeringId:{$in:offerings.map(o=>o._id)}}},{$group:{_id:'$offeringId',count:{$sum:1}}}]).toArray(),counts=new Map(stats.map(s=>[s._id,s.count]));
-  res.json({faculty:options.faculty.map(facultyView),subjects:options.subjects.map(s=>({id:s._id,code:s.code,name:s.name,scheme:s.scheme,semester:s.semester})),sections:options.sections,offerings:offerings.map(o=>({id:o._id,subjectId:o.subjectId,code:o.subjectCode,name:o.subjectName,semester:o.semester,section:o.section,scheme:o.scheme,teacherId:o.teacherId,teacher:staffById.has(o.teacherId)?facultyView(staffById.get(o.teacherId)):null,enrolled:counts.get(o._id)||0,active:o.active!==false,components:o.components?.length||0})),students:await database.collection('students').countDocuments({...scope,accountStatus:{$nin:['inactive','exited','deleting','deleted','exiting','deactivating']}})});
+  res.json({masters:masters.map(s=>({id:s._id,code:s.code,name:s.name,scheme:s.scheme,semester:s.semester,active:s.active!==false,activeOfferings:offerings.filter(o=>o.subjectId===s._id&&o.active!==false).length})),faculty:options.faculty.map(facultyView),subjects:options.subjects.map(s=>({id:s._id,code:s.code,name:s.name,scheme:s.scheme,semester:s.semester})),sections:options.sections,offerings:offerings.map(o=>({id:o._id,subjectId:o.subjectId,code:o.subjectCode,name:o.subjectName,semester:o.semester,section:o.section,scheme:o.scheme,teacherId:o.teacherId,teacher:staffById.has(o.teacherId)?facultyView(staffById.get(o.teacherId)):null,enrolled:counts.get(o._id)||0,active:o.active!==false,components:o.components?.length||0})),students:await database.collection('students').countDocuments({...scope,accountStatus:{$nin:['inactive','exited','deleting','deleted','exiting','deactivating']}})});
  });
  app.post(path+'/preview',async(req,res)=>{
   const session=client.startSession();try{let reviewed;await session.withTransaction(async()=>{reviewed=await plan(database,req.actor,req.body,session);},{readConcern:{level:'snapshot'}});res.json(reviewed.summary);}finally{await session.endSession();}
@@ -143,12 +170,20 @@ export function teachingAssignmentRoutes(app,{database,client,auth,provisionerOp
    let result;await session.withTransaction(async()=>{
     const p=await plan(database,req.actor,req.body,session),{old,next,teacher,dep,dependents,moves,roster,affected,summary}=p;
     if(summary.fingerprint!==req.body.fingerprint)fail('The assignment or its dependencies changed. Review again.','already-exists');
-    if(moves.length&&req.body.movePending!==true)fail('Confirm that the pending approvals should move to the new teacher.');
+    if(summary.blocked)fail(summary.blocked);
+    if(moves?.length&&req.body.movePending!==true)fail('Confirm that the pending approvals should move to the new teacher.');
     const opts={session},table=n=>database.collection(n);
     await table('departments').updateOne({_id:dep._id},{$inc:{teachingAssignmentRevision:1}},opts);
+    if(p.subject){
+     if(summary.operation==='subject-remove')await table('subjects').deleteOne({_id:p.subject._id},opts);
+     else await table('subjects').updateOne({_id:p.subject._id},{$set:{active:false,updatedAt:new Date()}},opts);
+     await table('superAdminAudit').insertOne({_id:randomUUID(),action:summary.operation==='subject-remove'?'SUBJECT_MASTER_REMOVED':'SUBJECT_MASTER_DEACTIVATED',actorUid:req.actor.uid,actorId:req.actor.uid,actorRole:p.user.role,departmentId:dep._id,targets:[p.subject._id],summary:p.subject.code+' — '+p.subject.name,timestamp:new Date()},opts);
+     result={id:p.subject._id};return;
+    }
     if(teacher)await table('users').updateOne({_id:teacher._id},{$inc:{accountMappingRevision:1}},opts);
     if(old&&old.teacherId!==teacher?._id)await table('users').updateOne({_id:old.teacherId},{$inc:{accountMappingRevision:1}},opts);
-    if(!old||p.relocate){if(old)await table('offerings').deleteOne({_id:old._id},opts);await table('offerings').insertOne({...next,updatedAt:new Date()},opts);}
+    if(summary.operation==='remove')await table('offerings').deleteOne({_id:old._id},opts);
+    else if(!old||p.relocate){if(old)await table('offerings').deleteOne({_id:old._id},opts);await table('offerings').insertOne({...next,updatedAt:new Date()},opts);}
     else{const {_id,...patch}=next;await table('offerings').updateOne({_id},{$set:{...patch,updatedAt:new Date()}},opts);}
     if(p.changedTeacher){
      const setTeacher={teacherId:next.teacherId};
@@ -171,11 +206,11 @@ export function teachingAssignmentRoutes(app,{database,client,auth,provisionerOp
       const {_id,...fields}=m.approvalItem;await table('approvals').updateOne({_id},{$set:fields},opts);
      }
     }
-    if((!old||p.relocate)&&next.active){
+    if((!old||p.relocate||old.active===false)&&next.active){
      const service=createProvisioner({...provisionerOptions,auth,db:new DocumentStore(database,client,session)});
      let cursor=null;do{const mapped=await service.dispatch(req.actor.uid,{action:'mapClass',department:dep.code,scheme:next.scheme,semester:next.semester,section:next.section,cursor});if(mapped.results.some(r=>r.error))fail('Could not safely map the class: '+mapped.results.find(r=>r.error).error);cursor=mapped.nextCursor;}while(cursor);
     }
-    await table('superAdminAudit').insertOne({_id:randomUUID(),action:'TEACHING_ASSIGNMENT_'+(summary.operation==='add'?'ADDED':summary.operation==='remove'?'REMOVED':p.changedTeacher&&!p.relocate?'REASSIGNED':'EDITED'),actorUid:req.actor.uid,actorId:req.actor.uid,actorRole:p.user.role,departmentId:dep._id,targets:unique([old?._id,next._id]),summary:next.subjectCode+' / Semester '+next.semester+' / Section '+next.section,previous:summary.previous,next:summary.next,previousTeacherId:old?.teacherId??null,newTeacherId:next.teacherId,pendingRequests:moves.map(m=>m.request._id),timestamp:new Date()},opts);
+    await table('superAdminAudit').insertOne({_id:randomUUID(),action:'TEACHING_ASSIGNMENT_'+(summary.operation==='add'?'ADDED':summary.operation==='remove'?'REMOVED':summary.operation==='deactivate'||old?.active!==false&&next.active===false?'DEACTIVATED':p.changedTeacher&&!p.relocate?'REASSIGNED':'EDITED'),actorUid:req.actor.uid,actorId:req.actor.uid,actorRole:p.user.role,departmentId:dep._id,targets:unique([old?._id,next._id]),summary:next.subjectCode+' / Semester '+next.semester+' / Section '+next.section,previous:summary.previous,next:summary.next,previousTeacherId:old?.teacherId??null,newTeacherId:next.teacherId,pendingRequests:moves.map(m=>m.request._id),timestamp:new Date()},opts);
     result={id:next._id,pendingMoved:moves.length};
    },{readConcern:{level:'snapshot'},writeConcern:{w:'majority'}});res.json(result);
   }finally{await session.endSession();}
