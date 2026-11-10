@@ -24,6 +24,7 @@ const hash=v=>createHash('sha256').update(v).digest('hex');
 const stamp=()=>FieldValue.serverTimestamp();
 const fail=(message,code='invalid-argument')=>{throw new HttpsError(code,message);};
 const email=v=>text(v).toLowerCase();
+const hasSignedIn=account=>Date.parse(account?.metadata?.lastSignInTime)>Date.parse(account?.metadata?.creationTime);
 const canonicalDepartment=departmentCode;
 const snapshotData=s=>s.exists?{...s.data(),uid:s.id}:null;
 // Existing local demo policy; production explicitly opts in by account type.
@@ -369,7 +370,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     const normalized=normalize(safe,p || await policy());
     await inactiveIdentity(normalized);
     let existing;try {existing=await auth.getUserByEmail(normalized.collegeEmail);}catch(error){if(error.code!=='auth/user-not-found')throw error;}
-    let pendingCaller;
+    let pendingCaller,authSetupPending=false;
     if(existing) {
       if(existing.disabled) fail('Existing account is inactive/disabled. Explicit administrative reactivation is required before importing.');
       const profile=(await db.doc(`users/${existing.uid}`).get()).data();
@@ -378,13 +379,14 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
       if(profile) {
         if(profile.scope==='department'&&canonicalDepartment(profile.department)!==normalized.department)fail('Existing staff identity belongs to another department.','already-exists');if(profile.role!==normalized.role || text(profile.facultyId).toUpperCase()!==normalized.facultyId || email(profile.email)!==normalized.collegeEmail) fail('Existing email belongs to a different role or employee ID. Import cannot change institutional identity.','already-exists');
         if(ownedJob && job.state!=='complete')pendingCaller=job.caller;
+        authSetupPending=job?.staffAuthPending===true||job?.email===normalized.collegeEmail&&job?.facultyId===normalized.facultyId&&job?.role===normalized.role&&job.activation==='delivery-failed'&&!hasSignedIn(existing);
       } else {
         if(!ownedJob) fail('Existing Authentication account has no matching institutional teacher profile. Review it individually.','already-exists');
         pendingCaller=job.caller;
       }
     }
     const {row}=await validate(safe,{uid:existing?.uid,p});
-    return {row:{...(row.departmentId?{departmentId:row.departmentId}:{}),...(row.strictDepartmentScope?{strictDepartmentScope:true}:{}),...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,collegeEmail:row.collegeEmail,phone:row.phone,department:row.department,employeeId:row.facultyId,role:row.role},uid:existing?.uid || row.existingUid,authMissing:!existing,pendingCaller};
+    return {row:{...(row.departmentId?{departmentId:row.departmentId}:{}),...(row.strictDepartmentScope?{strictDepartmentScope:true}:{}),...(row.isMentor!==undefined?{isMentor:row.isMentor}:{}),name:row.name,collegeEmail:row.collegeEmail,phone:row.phone,department:row.department,employeeId:row.facultyId,role:row.role},uid:existing?.uid || row.existingUid,authMissing:!existing,pendingCaller,authSetupPending};
   }
   async function previewTeachers(inputs) {
     if(!Array.isArray(inputs) || inputs.length<1 || inputs.length>100) fail('Preview 1–100 teacher rows per chunk.');
@@ -392,8 +394,8 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     for(let index=0;index<inputs.length;index++) {
       let checked;
       try {
-        const {row,uid,pendingCaller}=await validateTeacher(inputs[index],p);
-        const warnings=uid?[pendingCaller?'Retry will finish the interrupted teacher provisioning.':'Existing teacher will be updated; UID, password and teaching assignments are preserved.']:[];
+        const {row,uid,pendingCaller,authMissing,authSetupPending}=await validateTeacher(inputs[index],p);
+        const warnings=uid?[pendingCaller||authSetupPending?'Retry will finish the interrupted teacher provisioning.':authMissing?'Firebase sign-in will be initialized at the existing faculty UID.':'Existing teacher will be updated; UID, password and teaching assignments are preserved.']:[];
         checked={index,status:warnings.length?'WARNING':'VALID',row,warnings,accountExists:Boolean(uid)};
       } catch(error) {checked={index,status:'ERROR',row:inputs[index],error:error.message,duplicate:error.code==='already-exists',inactiveUid:error.inactiveUid};}
       // Mark both occurrences, including invalid rows, so a duplicate cannot
@@ -411,11 +413,11 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   }
   async function provisionTeacher(caller,input) {
     const p=await policy(),checked=await validateTeacher(input,p),row=checked.row;
-    if(!checked.uid || checked.authMissing || checked.pendingCaller) {
+    if(!checked.uid || checked.authMissing || checked.pendingCaller || checked.authSetupPending) {
       const result=await provision(checked.pendingCaller || caller,{...row,facultyId:row.employeeId},teacherRequestId(row));
       return {...result,employeeId:row.employeeId,accountUpdated:false};
     }
-    const uid=checked.uid,ref=db.doc(`users/${uid}`),keys=[['email',row.collegeEmail],['facultyId',row.employeeId]].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
+    const uid=checked.uid,ref=db.doc(`users/${uid}`),keys=[['email',row.collegeEmail],['facultyId',row.employeeId],['loginId',row.employeeId]].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
     await db.runTransaction(async t=>{
       const [profile,...identities]=await Promise.all([t.get(ref),...keys.map(key=>t.get(key))]);if(row.isMentor===false&&profile.data()?.isMentor&&!(await t.get(db.collection('students').where('mentorId','==',uid).limit(1))).empty)fail('Reassign mentees before removing mentor capability.');
       if(profile.data()?.role!==row.role || text(profile.data()?.facultyId).toUpperCase()!==row.employeeId || email(profile.data()?.email)!==row.collegeEmail || identities.some(s=>s.exists&&s.data().uid!==uid)) fail('Institutional identity changed; validate the teacher CSV again.','already-exists');
@@ -502,22 +504,51 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     const digest=hash(JSON.stringify({email:row.collegeEmail,role:row.role,usn:row.usn || '',...(row.role==='student'&&row.auid?{auid:row.auid}:{}),facultyId:row.facultyId,name:row.name,department:row.department,semester:row.semester || '',section:row.section || '',scheme:row.scheme,mentorId:row.mentorId || '',phone:row.phone,...(row.isMentor!==undefined?{isMentor:row.isMentor}:{})}));
     if(old && old.digest!==digest) fail('Retry ID already belongs to another row.','already-exists');
     if(row.existingUid && row.role!=='student') {
-      const existingUid=row.existingUid,ref=db.doc(`users/${existingUid}`),keys=[['email',row.collegeEmail],['facultyId',row.facultyId],['loginId',row.facultyId]].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
-      await db.runTransaction(async t=>{
-        const profile=(await t.get(ref)).data();
-        if(row.isMentor===false&&profile?.isMentor&&!(await t.get(db.collection('students').where('mentorId','==',existingUid).limit(1))).empty)fail('Reassign mentees before removing mentor capability.');
-        if(!profile||isInactive(profile)||profile.role!==row.role||email(profile.email)!==row.collegeEmail||text(profile.facultyId).toUpperCase()!==row.facultyId)fail('Staff identity changed during provisioning.','already-exists');
-        const identities=await Promise.all(keys.map(key=>t.get(key)));
-        if(identities.some(s=>s.exists&&s.data().uid!==existingUid))fail('Institutional identity reservation conflict.','already-exists');
-        identities.forEach((s,i)=>{if(!s.exists)t.create(keys[i],{uid:existingUid,createdAt:stamp()});});
-      });
-      let account,accountCreated=false;
+      const existingUid=row.existingUid;
+      const ref=db.doc(`users/${existingUid}`),setupRef=db.doc(`provisioningJobs/${existingUid}`);
+      const keys=[['email',row.collegeEmail],['facultyId',row.facultyId],['loginId',row.facultyId]].map(([kind,value])=>db.doc(`uniqueIdentities/${kind}_${hash(value)}`));
+      let account;
       try{account=await auth.getUser(existingUid);}catch(error){if(error.code!=='auth/user-not-found')throw error;}
-      if(!account){try{account=await auth.createUser({uid:existingUid,email:row.collegeEmail,displayName:row.name,password:temporaryAccount(row,p)?demoTemporaryPassword:randomBytes(48).toString('base64url'),disabled:false});accountCreated=true;}catch(error){if(!['auth/uid-already-exists','auth/email-already-exists'].includes(error.code))throw error;try{account=await auth.getUser(existingUid);}catch{fail('Firebase identity changed during provisioning.','already-exists');}}}
+      if(account&&(email(account.email)!==row.collegeEmail||account.disabled))fail('Firebase identity is conflicting or disabled.','already-exists');
+      const initialize=await db.runTransaction(async tx=>{
+        const profile=(await tx.get(ref)).data();
+        if(!profile||isInactive(profile)||profile.role!==row.role||email(profile.email)!==row.collegeEmail||text(profile.facultyId).toUpperCase()!==row.facultyId)fail('Staff identity changed during provisioning.','already-exists');
+        if(row.isMentor===false&&profile.isMentor&&!(await tx.get(db.collection('students').where('mentorId','==',existingUid).limit(1))).empty)fail('Reassign mentees before removing mentor capability.');
+        const setup=(await tx.get(setupRef)).data();
+        if(setup&&(setup.email!==row.collegeEmail||setup.role!==row.role||setup.facultyId!==row.facultyId))fail('Staff provisioning job belongs to a different identity.','already-exists');
+        for(const key of keys){
+          const reservation=await tx.get(key);
+          if(reservation.exists&&reservation.data().uid!==existingUid)fail('Institutional identity reservation conflict.','already-exists');
+          if(!reservation.exists)tx.create(key,{uid:existingUid,createdAt:stamp()});
+        }
+        const pending=!account||setup?.staffAuthPending===true||setup&&['reserved','auth-created'].includes(setup.state)||setup?.activation==='delivery-failed'&&!hasSignedIn(account);
+        if(pending)tx.set(setupRef,{email:row.collegeEmail,facultyId:row.facultyId,role:row.role,staffAuthPending:true,updatedAt:stamp()},{merge:true});
+        return {pending:Boolean(pending),temporary:temporaryAccount(row,p),alreadyChanged:Boolean(profile.passwordChangedAt||hasSignedIn(account))};
+      });
+      let accountCreated=false;
+      if(!account){
+        try{
+          account=await auth.createUser({uid:existingUid,email:row.collegeEmail,displayName:row.name,password:initialize.temporary?demoTemporaryPassword:randomBytes(48).toString('base64url'),disabled:false});
+          accountCreated=true;
+        }catch(error){
+          if(!['auth/uid-already-exists','auth/email-already-exists'].includes(error.code))throw error;
+          try{account=await auth.getUser(existingUid);}catch{fail('Firebase identity changed during provisioning.','already-exists');}
+        }
+      }
       if(email(account.email)!==row.collegeEmail||account.disabled)fail('Firebase identity is conflicting or disabled.','already-exists');
-      if(row.isMentor!==undefined)await ref.set({isMentor:row.isMentor},{merge:true});
-      if(accountCreated&&temporaryAccount(row,p))await ref.set({mustChangePassword:true,temporaryPasswordIssuedAt:new Date(Date.now()+1)},{merge:true});
-      return {uid:existingUid,email:row.collegeEmail,role:row.role,accountCreated,authRepaired:accountCreated,subjectsMapped:0,warnings,...(accountCreated?await activation(existingUid,p):{activation:'unchanged'})};
+      const metadata={...(row.isMentor!==undefined?{isMentor:row.isMentor}:{})};
+      if(initialize.pending&&initialize.temporary&&!initialize.alreadyChanged&&!hasSignedIn(account)){
+        metadata.mustChangePassword=true;
+        metadata.temporaryPasswordIssuedAt=new Date(Math.max(Date.now()+1,Date.parse(account.metadata?.creationTime)||0));
+      }
+      if(Object.keys(metadata).length)await ref.set(metadata,{merge:true});
+      const delivery=initialize.pending&&!initialize.alreadyChanged&&!hasSignedIn(account)?await activation(existingUid,p):{activation:'unchanged'};
+      const result={uid:existingUid,email:row.collegeEmail,role:row.role,accountCreated,authRepaired:accountCreated,subjectsMapped:0,warnings,...delivery};
+      if(initialize.pending){
+        const {demoPassword,...stored}=result;
+        await setupRef.set({state:'complete',staffAuthPending:false,...(delivery.activation!=='unchanged'?{activation:delivery.activation}:{}),result:stored,updatedAt:stamp()},{merge:true});
+      }
+      return result;
     }
     if(row.existingUid) {
       const student=(await db.doc(`students/${row.existingUid}`).get()).data();
@@ -596,7 +627,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     const delivery=await activation(uid,p);
     const result={uid,name:row.name,usn:row.usn || '',...(row.auid?{auid:row.auid}:{}),email:row.collegeEmail,section:row.section || '',role:row.role,accountCreated:true,academicMappingCreated:row.role==='student' && subjectsMapped>0,mentorMapped:row.role==='student',subjectsMapped,warnings,...delivery};
     const {demoPassword,...storedResult}=result;
-    await jobRef.set({state:'complete',result:storedResult,updatedAt:stamp()},{merge:true});
+    await jobRef.set({state:'complete',...(row.role!=='student'?{activation:delivery.activation}:{}),result:storedResult,updatedAt:stamp()},{merge:true});
     return result;
   }
   // Explicit administrator repair for local demos. Normal imports continue to

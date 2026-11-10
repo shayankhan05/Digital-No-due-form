@@ -1699,3 +1699,47 @@ test('student CSV reconciles scoped identities and preserves academic and Fireba
   assert.ok((await token(changedEmail)).length);
  }finally{if(policy)await database.collection('institutionPolicy').replaceOne({_id:'institution'},policy);}
 });
+
+
+test('faculty CSV creates one Firebase identity and resolves both login identifiers',async()=>{
+ const row={name:'Faculty CSV login regression',collegeEmail:'faculty-csv-login-regression@demo.test',phone:'9000000000',employeeId:'FAC-CSV-LOGIN-REG',department:'ISE',role:'subject_faculty'};
+ const checked=await api('super_admin','/api/college-import/preview',{type:'teachers',rows:[row],requestId:crypto.randomUUID()});
+ assert.equal(checked.body.errors,0,JSON.stringify(checked.body));
+ const done=await api('super_admin','/api/college-import/confirm',{jobId:checked.body.jobId,confirmation:true});
+ assert.equal(done.body.errors,0,JSON.stringify(done.body));
+ const account=await auth.getUserByEmail(row.collegeEmail),user=await database.collection('users').findOne({_id:account.uid});
+ assert.equal(user.firebaseUid,account.uid);
+ assert.equal(user.facultyId,row.employeeId);
+ for(const identifier of [row.collegeEmail.toUpperCase(),' '+row.employeeId.toLowerCase()+' ']){
+  const signed=await request(app).post('/api/auth/login').send({identifier,password:'DemoPassword123!'});
+  assert.equal(signed.status,200,JSON.stringify(signed.body));
+  assert.equal(signed.body.email,row.collegeEmail);
+ }
+ const replay=await api('super_admin','/api/college-import/confirm',{jobId:checked.body.jobId,confirmation:true});
+ assert.equal(replay.body.results[0].uid,account.uid);
+ assert.equal(await database.collection('users').countDocuments({email:row.collegeEmail}),1);
+});
+
+test('faculty CSV finishes a Mongo-only Auth setup interrupted after Firebase creation',async()=>{
+ const uid='faculty-auth-interrupted-regression';
+ const row={name:'Faculty Auth recovery regression',collegeEmail:'faculty-auth-recovery-regression@demo.test',phone:'9000000000',employeeId:'FAC-AUTH-RECOVERY-REG',department:'ISE',role:'subject_faculty'};
+ const previousPolicy=(await store.doc('settings/institution').get()).data();
+ await store.doc('settings/institution').set({demoStaffProvisioningEnabled:true},{merge:true});
+ try{
+  await store.doc('users/'+uid).set({name:row.name,email:row.collegeEmail,facultyId:row.employeeId,role:row.role,department:row.department,isMentor:true});
+  const service=createProvisioner({db:store,demo:false,auth:{
+   getUser:(...args)=>auth.getUser(...args),getUserByEmail:(...args)=>auth.getUserByEmail(...args),
+   createUser:async input=>{await auth.createUser(input);throw Error('Injected lost Firebase response');},
+  }});
+  await assert.rejects(service.dispatch(accounts.super_admin.uid,{action:'importTeacher',row}),/lost Firebase response/);
+  assert.equal((await database.collection('provisioningJobs').findOne({_id:uid})).staffAuthPending,true);
+  const repaired=await createProvisioner({db:store,auth,demo:false}).dispatch(accounts.super_admin.uid,{action:'importTeacher',row});
+  assert.equal(repaired.uid,uid);assert.equal(repaired.activation,'temporary-password');
+  const job=await database.collection('provisioningJobs').findOne({_id:uid});
+  assert.equal(job.state,'complete');assert.equal(job.staffAuthPending,false);
+  const user=await database.collection('users').findOne({_id:uid});
+  assert.equal(user.mustChangePassword,true);assert.equal(user.isMentor,true);
+  assert.equal(await database.collection('uniqueIdentities').countDocuments({uid}),3);
+  for(const identifier of [row.collegeEmail,row.employeeId])assert.equal((await request(app).post('/api/auth/login').send({identifier,password:'DemoPassword123!'})).status,200);
+ }finally{await store.doc('settings/institution').set(previousPolicy);}
+});
