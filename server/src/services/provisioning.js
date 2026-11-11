@@ -12,7 +12,7 @@ import {departmentCode} from '../../../js/department.js';
 import {isManager} from './roles.js';
 import {accountExit,isInactive} from './account-removal.js';
 import {authorizeAccountTarget} from './department-master.js';
-import {activeStudentRequests,resolveStudentImport,studentIdentityKey} from './student-import-reconciliation.js';
+import {activeStudentRequests,resolveStudentImport,studentIdentityKey,studentNameKey,verifiedDemoStudent} from './student-import-reconciliation.js';
 import {createHash,randomBytes} from 'node:crypto';
 import {FieldValue,HttpsError} from './values.js';
 
@@ -143,6 +143,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
       if(users.size || students.size){
         if(users.size!==1 || students.size!==1 || users.docs[0].id!==students.docs[0].id || uid && uid!==users.docs[0].id) fail('Email/USN institutional identity conflict.','already-exists');
         const user=users.docs[0].data(),profile=students.docs[0].data();
+        if(studentNameKey(profile.name)!==studentNameKey(row.name)||await verifiedDemoStudent(db,users.docs[0].id,profile,user))fail('This student identity needs reviewed demo replacement or manual review; it cannot be silently reused.','already-exists');
         if(isInactive(user)||isInactive(profile))fail('Existing student is inactive. Explicit reactivation is required.');
         if(user.role!=='student' || email(profile.email)!==row.collegeEmail || text(profile.usn).toUpperCase()!==row.usn || canonicalDepartment(profile.department)!==row.department || Number(profile.semester)!==row.semester || text(profile.section).toUpperCase()!==row.section || text(profile.scheme)!==row.scheme) fail('Existing email belongs to a different student identity or class.','already-exists');
         uid=users.docs[0].id;row.existingUid=uid;
@@ -214,8 +215,8 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     const academicChanged=placement()||profile.mentorId!==row.mentorId;
     row.offerings=await matchingOfferings(row);
     if(!row.offerings.length){
-      if(academicChanged)fail('Configure active teaching assignments before changing this student’s academic mapping.','failed-precondition');
-      warnings.push('No active offerings match this student’s class.');
+      if(academicChanged)fail('Configure active teaching assignments before changing this studentï¿½s academic mapping.','failed-precondition');
+      warnings.push('No active offerings match this studentï¿½s class.');
     }else await planFor(row,row.offerings);
     const fields={name:row.name,email:row.collegeEmail,phone:row.phone,scheme:row.scheme};
     const studentFields={...fields,semester:row.semester,section:row.section,mentorId:row.mentorId,...(row.auid?{auid:profile.auid||row.auid}:{})};
@@ -237,8 +238,8 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
         rows.push({index,row,status:plan.changes?.academicDeferred||!offerings?.length?'WARNING':'VALID',classification:plan.classification,warnings:plan.warnings,changes:plan.changes,
           existingUid:plan.uid,target:plan.target,subjectsMapped:offerings?.length||0});
       }catch(error){
-        const classification=error.code==='already-exists'?'CONFLICT':'ERROR';
-        rows.push({index,row:input,status:'ERROR',classification,error:error.message});
+        const classification=error.identityReview?.classification||(error.code==='already-exists'?'CONFLICT':'ERROR');
+        rows.push({index,row:input,status:'ERROR',classification,error:error.message,...(error.identityReview?{identityReview:error.identityReview}: {})});
       }
     }
     return {rows};
@@ -798,5 +799,5 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     if(result.accountCreated)await db.runTransaction(async tx=>{const ref=db.doc('accountExitEvents/super_admin_bootstrap_'+result.uid);if(!(await tx.get(ref)).exists)tx.create(ref,{action:'super_admin_bootstrap',actorId:caller,targetUid:result.uid,at:stamp()});});
     return result;
   }
-  return {dispatch,previewStudentImport,reconcileStudentImport,restoreStudentMappings,bootstrapSuperAdmin};
+  return {dispatch,previewStudentImport,reconcileStudentImport,prepareStudentReplacement:async input=>{const p=await policy(),row=normalize({...input,role:'student'},p);row.mentorId=(await mentor(row)).uid;row.offerings=await matchingOfferings(row);if(!row.offerings.length)fail('Configure current subject offerings before replacement.');await planFor(row,row.offerings);return row;},rebuildStudentMappings:mapStudent,restoreStudentMappings,bootstrapSuperAdmin};
 }

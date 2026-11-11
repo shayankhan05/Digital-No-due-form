@@ -14,4 +14,4 @@ export function resumeChange(r) {
   if (r.hodApproval.status === "rejected") return { hodApproval: { status: "pending", remarks: "" }, status: STATUS.PENDING_HOD };
   throw new Error("No rejected decision was found.");
 }
-export function statusLabel(status) { return ({ pending_stage1: "In progress", pending_mentor: "With mentor", pending_hod: "With coordinator", cleared: "Cleared", rejected: "Rejected", issued: "Hall ticket issued" })[status] || status; }
+export function statusLabel(status) { return ({ pending_stage1: "In progress", pending_mentor: "With mentor", pending_hod: "With coordinator", cleared: "Cleared", rejected: "Rejected", issued: "Hall ticket issued", reset: "Administratively reset" })[status] || status; }

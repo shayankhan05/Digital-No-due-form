@@ -19,11 +19,12 @@ export function resumeChange(r) {
   if (r.officeApproval?.status === "rejected") return { officeApproval: { status: "pending", remarks: "" }, status: STATUS.CLEARED };
   throw new Error("No rejected decision was found.");
 }
-export function statusLabel(status) { return ({ pending_stage1: "In progress", pending_mentor: "With mentor", pending_hod: "With coordinator", cleared: "Cleared", rejected: "Rejected", issued: "Hall ticket issued" })[status] || status; }
+export function statusLabel(status) { return ({ pending_stage1: "In progress", pending_mentor: "With mentor", pending_hod: "With coordinator", cleared: "Cleared", rejected: "Rejected", issued: "Hall ticket issued", reset: "Administratively reset" })[status] || status; }
 
 // Check actual prerequisite decisions as well as the queue status. A stale status
 // or a shared approver UID must never authorize a later responsibility.
 export function stageReady(request, stage) {
+  if(["reset","cancelled","exited"].includes(request.status))return false;
   const keys=Object.keys(request.approvalItems||{});
   const subjectsDone=keys.length>0 && keys.every(key=>request.approvalStates?.[key]==='approved');
   return subjectsDone && (stage==='mentor' || request.mentorApproval?.status==='approved')

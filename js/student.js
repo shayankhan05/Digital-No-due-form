@@ -628,6 +628,10 @@ function requestStatusHTML(request) {
 
   switch (request.status) {
 
+    case "reset":
+      message = "This request was administratively reset. Its approvals remain in history. You can make a new request.";
+      break;
+
     case "pending_stage1":
 
       message =
@@ -700,6 +704,7 @@ function requestStatusHTML(request) {
     </div>
 
 
+    ${request.status==="reset"?`<p>Reset reason: ${escapeHtml(request.resetReason||"")}</p><a class="btn btn-primary" href="create-request.html">Make Request Again</a>`:""}
     ${approvalHTML(request)}
     <p class="muted">
 

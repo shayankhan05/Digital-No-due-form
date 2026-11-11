@@ -40,7 +40,7 @@ async function admin(data){const response=await api('admin','/api/admin',data);a
 async function finishTemporary(email){const before=await token(email),changed=await fetch('http://127.0.0.1:9298/identitytoolkit.googleapis.com/v1/accounts:update?key=fake-api-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idToken:before,password:'ChangedAudit123!',returnSecureToken:true})}),result=await changed.json();assert.ok(result.idToken,JSON.stringify(result));passwords.set(email,'ChangedAudit123!');const done=await request(app).post('/api/auth/password-complete').set('Authorization','Bearer '+await token(email)).send({});assert.equal(done.status,200,JSON.stringify(done.body));}
 before(async()=>{
  frontendHttp=express().use(express.static(fileURLToPath(new URL('../..',import.meta.url)))).listen(5051,'127.0.0.1');
- mongo=await MongoMemoryReplSet.create({replSet:{storageEngine:'wiredTiger'}});({client,database}=await connectDatabase(mongo.getUri('migration_audit')));const firebase=firebaseAdmin();auth=firebase.auth;adminApp=firebase.app;({app,store}=createApp({database,client,auth,demo:true,origins:['http://127.0.0.1:5051']}));http=app.listen(3001);
+ mongo=await MongoMemoryReplSet.create({replSet:{storageEngine:'wiredTiger'}});({client,database}=await connectDatabase(mongo.getUri('migration_audit')));const firebase=firebaseAdmin();auth=firebase.auth;adminApp=firebase.app;({app,store}=createApp({database,client,auth,demo:true,testDataBackupKey:'ab'.repeat(32),origins:['http://127.0.0.1:5051']}));http=app.listen(3001);
  for(const role of ['super_admin','admin','subject_faculty','mentor','hod','office','library','accounts','sports']){const email=`mongo-${role}@demo.test`,user=await auth.createUser({email,password:'DemoPassword123!',displayName:role});accounts[role]={uid:user.uid,email};await store.doc(`users/${user.uid}`).set({name:role,email,role,department:'ISE',facultyId:role,...(role==='sports'?{scope:'institution'}:{})});}
  await store.doc('settings/workflow').set({library:accounts.library.uid,accounts:accounts.accounts.uid,sports:accounts.sports.uid,hodId:accounts.hod.uid,officeId:accounts.office.uid});await store.doc('settings/institution').set({allowedDomains:['demo.test'],departments:['ISE'],sections:['A','B','C']});
 });
@@ -66,7 +66,7 @@ test('real Chrome login, student academics, teacher roster, Office duplicates an
  const office=await login('office');await office.page.locator('#usnInput').fill('Duplicate');await office.page.locator('#searchBtn').click();await office.page.getByText('2 students found with this name',{exact:true}).waitFor();assert.equal(await office.page.locator('.office-search-student').count(),2);await office.page.setViewportSize({width:390,height:844});assert.equal(await office.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await office.context.close();
 });
 test('real Chrome imports faculty and students while legacy class provisioning remains compatible',async()=>{
- const actor=await browserLogin('admin');async function upload(type,headers,row){await actor.page.goto('http://127.0.0.1:5051/admin-dashboard.html');await actor.page.evaluate(type=>location.hash=type==='students'?'students':'faculty-staff',type);await actor.page.locator('#importFile').waitFor();const quote=v=>'"'+String(v??'').replaceAll('"','""')+'"';await actor.page.locator('#importFile').setInputFiles({name:'isolated.csv',mimeType:'text/csv',buffer:Buffer.from(headers.join(',')+'\n'+headers.map(k=>quote(row[k])).join(','))});await actor.page.locator('#previewBtn').click();await actor.page.waitForFunction(()=>document.getElementById('importProgress')?.textContent.startsWith('Preview ready'));assert.match(await actor.page.locator('#importPreview').innerText(),/0 error rows/);for(const width of [1920,1366,1024,768,390]){await actor.page.setViewportSize({width,height:900});assert.ok(await actor.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'CSV preview overflow '+width);} await actor.page.locator('#acceptWarnings').check();await actor.page.locator('#importBtn').click();await actor.page.waitForFunction(()=>document.getElementById('importProgress')?.textContent.includes('rows completed'));assert.match(await actor.page.locator('#importProgress').innerText(),/0 failed or skipped/);}
+ const actor=await browserLogin('admin');async function upload(type,headers,row){await actor.page.goto('http://127.0.0.1:5051/admin-dashboard.html');await actor.page.evaluate(type=>location.hash=type==='students'?'students':'faculty-staff',type);await actor.page.locator('#importFile').waitFor();const quote=v=>'"'+String(v??'').replaceAll('"','""')+'"';await actor.page.locator('#importFile').setInputFiles({name:'isolated.csv',mimeType:'text/csv',buffer:Buffer.from(headers.join(',')+'\n'+headers.map(k=>quote(row[k])).join(','))});await actor.page.locator('#previewBtn').click();await actor.page.waitForFunction(()=>/^(Preview ready|Completed)/.test(document.getElementById('importProgress')?.textContent||''));await actor.page.waitForFunction(()=>document.getElementById('collegeImport')?.dataset.running!=='true');assert.match(await actor.page.locator('#importPreview').innerText(),/0 error rows/);for(const width of [1920,1366,1024,768,390]){await actor.page.setViewportSize({width,height:900});assert.ok(await actor.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'CSV preview overflow '+width);} if(!await actor.page.locator('#importProgress').innerText().then(t=>t.startsWith('Completed'))){await actor.page.locator('#acceptWarnings').check();await actor.page.locator('#importBtn').click();}await actor.page.waitForFunction(()=>document.getElementById('importProgress')?.textContent.includes('rows completed'));assert.match(await actor.page.locator('#importProgress').innerText(),/0 failed or skipped/);}
  await upload('teachers',['name','collegeEmail','phone','department','employeeId','role'],{name:'CSV UI Teacher',collegeEmail:'mongo-ui-teacher@demo.test',phone:'9000000000',department:ISE_LABEL,employeeId:'MONGO-UI',role:'subject_faculty'});
  const legacyClass=await api('admin','/api/admin',{action:'importOffering',row:{department:ISE_LABEL,scheme:'2022',semester:5,section:'C',subjectCode:'UIT501',subjectName:'Browser CSV course',teacherEmail:'mongo-ui-teacher@demo.test',credits:4,components:[{id:'ia1',label:'IA1',max:30},{id:'assignment',label:'Assignment',max:10}]}});assert.equal(legacyClass.status,200,JSON.stringify(legacyClass.body));
  const row={name:'CSV UI Student',usn:'1AY99IS199',collegeEmail:'mongo-ui-student@demo.test',phone:'9000000000',department:ISE_LABEL,semester:5,section:'C',scheme:'2022',mentorEmail:accounts.mentor.email};await upload('students',['name','usn','collegeEmail','phone','department','semester','section','scheme','mentorEmail'],row);await upload('students',['name','usn','collegeEmail','phone','department','semester','section','scheme','mentorEmail'],row);const profile=await database.collection('students').findOne({usn:row.usn});assert.ok(profile);assert.equal(await database.collection('students').countDocuments({usn:row.usn}),1);assert.equal(await database.collection('enrollments').countDocuments({studentId:profile._id}),2);await actor.context.close();
@@ -419,7 +419,7 @@ test('Chrome: rejecting Software Quality Engineering leaves the sibling and Libr
  // Use a fresh isolated API fixture: the full browser suite accumulates more than
  // the normal 100 sign-ins/IP/window. Keep the real authentication limit intact.
  await new Promise(resolve=>http.close(resolve));
- ({app,store}=createApp({database,client,auth,demo:true,origins:['http://127.0.0.1:5051']}));http=app.listen(3001);
+ ({app,store}=createApp({database,client,auth,demo:true,testDataBackupKey:'ab'.repeat(32),origins:['http://127.0.0.1:5051']}));http=app.listen(3001);
  const {id,r}=await parallelFixture('exact-140'),[rejectedKey,siblingKey]=retrySubjects,reason='Assignment pending.';
  for(const [key,item]of Object.entries(r.approvalItems))if(!retrySubjects.includes(key)&&key!=='library')await retryAction(item.approverType==='subject_faculty'?'subject_faculty':key,id,{action:'stage1',approvalId:key,decision:'approved'});
  let teacher=await browserLogin('retryTeacher');await teacher.page.goto('http://127.0.0.1:5051/approver-dashboard.html#requests');
@@ -486,7 +486,7 @@ test('marks CSV shared schema normalizes headers without accepting unknown or du
 });
 
 test('real Chrome exact exported headers round-trip for three students and clear stale validation',async()=>{
- await new Promise(resolve=>http.close(resolve));({app,store}=createApp({database,client,auth,demo:true,origins:['http://127.0.0.1:5051']}));http=app.listen(3001);
+ await new Promise(resolve=>http.close(resolve));({app,store}=createApp({database,client,auth,demo:true,testDataBackupKey:'ab'.repeat(32),origins:['http://127.0.0.1:5051']}));http=app.listen(3001);
  const o=await database.collection('offerings').findOne({subjectCode:'ROUND501'});
  const row={name:'Marks Roundtrip Student',usn:'1AY99IS242',collegeEmail:'marks-roundtrip-student@demo.test',phone:'9000000242',department:'ISE',semester:5,section:'B',scheme:'2022',mentorEmail:accounts.mentor.email,role:'student'};
  const created=await admin({action:'provision',row,requestId:'marks-roundtrip-student'});accounts.roundStudent={uid:created.uid,email:row.collegeEmail};await finishTemporary(row.collegeEmail);
@@ -570,7 +570,7 @@ test('full department CSV label and explicit legacy alias preserve exact offerin
 });
 
 test('Chrome profiles, admin policy, offerings and Office display the full ISE department label',async()=>{
- await new Promise(resolve=>http.close(resolve));({app,store}=createApp({database,client,auth,demo:true,origins:['http://127.0.0.1:5051']}));http=app.listen(3001);
+ await new Promise(resolve=>http.close(resolve));({app,store}=createApp({database,client,auth,demo:true,testDataBackupKey:'ab'.repeat(32),origins:['http://127.0.0.1:5051']}));http=app.listen(3001);
  for(const role of ['student1','teacher2','mentor','hod','accounts','office','admin']){
   const actor=await browserLogin(role);
   if(role==='admin'){await actor.page.locator('#accountForm').waitFor({state:'attached'});assert.equal(await actor.page.locator('#policyForm').count(),0);}
@@ -591,7 +591,7 @@ test('exit management lookup, directory and exports are authorized server-side a
 
 let exitFixtures;
 test('Chrome dedicated student/faculty exit workflows protect active classes and preserve history through deactivation and exports',async()=>{
- await new Promise(resolve=>http.close(resolve));({app,store}=createApp({database,client,auth,demo:true,origins:['http://127.0.0.1:5051']}));http=app.listen(3001);
+ await new Promise(resolve=>http.close(resolve));({app,store}=createApp({database,client,auth,demo:true,testDataBackupKey:'ab'.repeat(32),origins:['http://127.0.0.1:5051']}));http=app.listen(3001);
  const originalCSV=await readFile('../templates/student-import.csv','utf8');
  const facultyRow={name:'Disposable Exit Faculty',collegeEmail:'exit-faculty@demo.test',phone:'9000000191',department:ISE_LABEL,employeeId:'EXITFAC191',role:'subject_faculty'},teacher=await admin({action:'importTeacher',row:facultyRow});accounts.exitFaculty={uid:teacher.uid,email:facultyRow.collegeEmail};
  const replacementRow={...facultyRow,name:'Exit Replacement Faculty',collegeEmail:'exit-replacement@demo.test',employeeId:'EXITFAC192'},replacement=await admin({action:'importTeacher',row:replacementRow});
@@ -624,7 +624,7 @@ test('Chrome dedicated student/faculty exit workflows protect active classes and
 });
 
 test('Chrome explicit CSV reactivation restores the original student UID, mappings and password without reviving cancelled requests',async()=>{
- const {studentRow,student,retained,pending,facultyRow,teacher}=exitFixtures;const actor=await browserLogin('admin');await actor.page.evaluate(()=>location.hash='students');await actor.page.locator('#importFile').waitFor();const headers=['name','usn','collegeEmail','phone','department','semester','section','scheme','mentorEmail'];await actor.page.locator('#importFile').setInputFiles({name:'exit-source.csv',mimeType:'text/csv',buffer:Buffer.from(csvOf([studentRow],headers))});await actor.page.locator('#previewBtn').click();await actor.page.getByText('This identity already exists but is inactive.',{exact:false}).first().waitFor();assert.equal(await actor.page.locator('#importBtn').isDisabled(),true);await actor.page.locator('#importPreview [data-reactivate-account]').click();const dialog=actor.page.locator('#accountReactivationDialog');await dialog.locator('#reactivateConfirmation').check();await dialog.locator('#confirmReactivation').click();await dialog.getByText(/Existing account reactivated/).waitFor();await dialog.getByRole('button',{name:'Close',exact:true}).click();await actor.page.waitForFunction(()=>document.getElementById('importPreview').textContent.includes('0 error rows'));
+ const {studentRow,student,retained,pending,facultyRow,teacher}=exitFixtures;const actor=await browserLogin('admin');await actor.page.evaluate(()=>location.hash='students');await actor.page.locator('#importFile').waitFor();const headers=['name','usn','collegeEmail','phone','department','semester','section','scheme','mentorEmail'];await actor.page.locator('#importFile').setInputFiles({name:'exit-source.csv',mimeType:'text/csv',buffer:Buffer.from(csvOf([studentRow],headers))});await actor.page.locator('#previewBtn').click();await actor.page.locator('#importPreview').getByText('INACTIVE',{exact:true}).waitFor();assert.equal(await actor.page.locator('#importBtn').isDisabled(),true);await actor.page.locator('#acceptWarnings').check();await actor.page.locator('#reactivateStudents').check();await actor.page.locator('#importBtn').click();await actor.page.waitForFunction(()=>document.getElementById('importProgress').textContent.includes('rows completed'));
  assert.equal((await database.collection('students').findOne({_id:student.uid})).accountStatus,'active');assert.equal(await database.collection('users').countDocuments({email:studentRow.collegeEmail}),1);assert.equal(await database.collection('students').countDocuments({usn:studentRow.usn}),1);assert.equal((await auth.getUser(student.uid)).disabled,false);assert.ok(await token(studentRow.collegeEmail));const enrollments=await database.collection('enrollments').find({studentId:student.uid,active:true}).toArray();assert.ok(enrollments.length>0);assert.equal(new Set(enrollments.map(e=>e.offeringId)).size,enrollments.length);assert.ok(enrollments.every(e=>e.section==='A'&&e.accountStatus==='active'));
  assert.equal((await api('office','/api/office/search',{term:studentRow.usn})).body.count,1);assert.equal((await database.collection('noDueRequests').findOne({_id:pending})).status,'pending_stage1');for(const name of ['marks','hallTickets'])assert.deepEqual(await database.collection(name).find({studentId:student.uid}).toArray(),retained[name]);const again=await exitCall('admin',{action:'reactivate',kind:'student',uid:student.uid,confirmation:'REACTIVATE'});assert.equal(again.status,200);assert.equal(await database.collection('enrollments').countDocuments({studentId:student.uid,active:true}),enrollments.length);
  const repeat=await admin({action:'provision',row:studentRow,requestId:'exit-reimport-reactivated'});assert.equal(repeat.uid,student.uid);assert.equal(await database.collection('students').countDocuments({usn:studentRow.usn}),1);
@@ -1601,7 +1601,7 @@ test('student CSV reconciles scoped identities and preserves academic and Fireba
  const policy=await database.collection('institutionPolicy').findOne({_id:'institution'});
  await database.collection('institutionPolicy').updateOne({_id:'institution'},{$set:{allowedDomains:['demo.test','college.edu'],sections:['A','B'],sectionRecords:[]}});
  const makeStudent=async(key,usn,fields={})=>{
-  const student=await person(key,'student',{phone:'9876543210',...fields});
+  const student=await person(key,'student',{name:'Professor Name '+usn.slice(5),phone:'9876543210',...fields});
   await store.doc('students/'+student.uid).set({...student.profile,uid:student.uid,usn,semester:5,section:'A',scheme,mentorId:mentorA.uid});
   return student;
  };
@@ -1742,4 +1742,118 @@ test('faculty CSV finishes a Mongo-only Auth setup interrupted after Firebase cr
   assert.equal(await database.collection('uniqueIdentities').countDocuments({uid}),3);
   for(const identifier of [row.collegeEmail,row.employeeId])assert.equal((await request(app).post('/api/auth/login').send({identifier,password:'DemoPassword123!'})).status,200);
  }finally{await store.doc('settings/institution').set(previousPolicy);}
+});
+
+
+let safetyFixture;
+async function setupSafetyFixture(){
+ if(safetyFixture)return safetyFixture;
+ const did='safe-admin-fixture',department='SFA',scheme='SAFE2026',ids={};
+ await store.doc('departments/'+did).set({code:department,codeKey:department.toLowerCase(),name:'Safety Fixture Department',nameKey:'safety fixture department',status:'active',sections:['A'],creationDigest:'isolated-safety'});
+ await store.doc('schemes/safety-scheme').set({code:scheme,codeKey:scheme.toLowerCase(),name:'Safety Fixture Scheme',nameKey:'safety fixture scheme',scope:'institution',status:'active'});
+ for(const role of ['subject_faculty','mentor','hod','office','library','accounts','sports','physics_lab','chemistry_lab']){
+  const email='safe-fixture-'+role+'@demo.test',a=await auth.createUser({email,password:'DemoPassword123!'});
+  ids[role]=a.uid;await store.doc('users/'+a.uid).set({name:'Safety '+role,email,role,facultyId:'SAFE-'+role.toUpperCase(),scope:['accounts','sports'].includes(role)?'institution':'department',department,departmentId:did,...(role==='subject_faculty'?{isMentor:true}: {})});
+ }
+ await store.doc('departments/'+did).update({hodId:ids.hod,officeId:ids.office});
+ await store.doc('departmentWorkflows/'+did).set({...ids,hodId:ids.hod,officeId:ids.office,officeScopeVersion:2});
+ const offeringId='safety-fixture-offering';await store.doc('subjects/safety-fixture-subject').set({code:'SAFE501',name:'Safety Course',semester:5,department,departmentId:did,scheme});
+ await store.doc('offerings/'+offeringId).set({subjectId:'safety-fixture-subject',subjectCode:'SAFE501',subjectName:'Safety Course',teacherId:ids.subject_faculty,department,departmentId:did,semester:5,section:'A',scheme,active:true,components:[{id:'ia1',label:'IA1',max:30}]});
+ return safetyFixture={did,department,scheme,ids,offeringId,mentorEmail:'safe-fixture-mentor@demo.test'};
+}
+
+test('administrative reset preserves decisions, blocks unauthorized and duplicate resets, and permits a fresh request',async()=>{
+ const {recordDigest}=await import('../src/services/presentation-reset.js');
+ const fixture=await setupSafetyFixture();
+ const row={name:'Reset Audit Student',usn:'RESETSAFE01',auid:'RESET2026001',collegeEmail:'reset-safe@demo.test',phone:'9123456700',department:fixture.department,semester:5,section:'A',scheme:fixture.scheme,mentorEmail:fixture.mentorEmail};
+ const provisioned=await api('super_admin','/api/admin',{action:'provision',row,requestId:'reset-safe-student'});assert.equal(provisioned.status,200,JSON.stringify(provisioned.body));const created=provisioned.body;accounts.reset_safe={uid:created.uid,email:row.collegeEmail};await finishTemporary(row.collegeEmail);
+ for(const [index,status,approved]of [[0,'pending_stage1',0],[1,'pending_stage1',1],[2,'pending_stage1',2],[3,'pending_mentor',5],[4,'pending_hod',5],[5,'cleared',5]]){
+  const made=await api('reset_safe','/api/requests',{requestKey:'reset-submit-'+index});assert.equal(made.status,200,JSON.stringify(made.body));const id=made.body.id;
+  const original=await database.collection('noDueRequests').findOne({_id:id}),keys=Object.keys(original.approvalStates);
+  await database.collection('noDueRequests').updateOne({_id:id},{$set:{status,approvalStates:Object.fromEntries(keys.map((k,i)=>[k,i<approved?'approved':'pending'])),mentorApproval:{status:['pending_hod','cleared'].includes(status)?'approved':'pending',remarks:'Keep this remark',actedAt:new Date('2026-01-01T00:00:00Z')}}});
+  const before=await database.collection('noDueRequests').findOne({_id:id}),projections=await database.collection('approvals').find({__parent:id}).toArray(),input={reason:'Reset audit fixture only',confirmation:true,version:before.version,requestKey:'reset-audit-key-'+index},url='/api/oversight/requests/'+id+'/reset';
+  for(const who of ['admin','reset_safe','mentor','subject_faculty'])assert.equal((await api(who,url,input)).status,403);
+  assert.equal((await api('super_admin',url,{...input,reason:' '})).status,400);
+  assert.equal((await api('super_admin',url,{...input,version:999})).status,409);
+
+  if(index===0){
+   const ui=await browserLogin('super_admin');try{
+    await ui.page.evaluate(({uid,id})=>sessionStorage.setItem('department-context:'+uid,id),{uid:accounts.super_admin.uid,id:fixture.did});
+    await ui.page.goto('http://127.0.0.1:5051/super-admin-dashboard.html#workflow-monitor');await ui.page.locator('body.workspace-ready').waitFor();
+    const form=ui.page.locator('#monitorFilters');await form.locator('[name=departmentId]').selectOption(fixture.did);await form.locator('[name=term]').fill(row.usn);await form.getByRole('button',{name:'Find requests'}).click();
+    await ui.page.getByRole('button',{name:'View complete flow'}).first().click();await ui.page.getByRole('button',{name:'Reset No-Due Request',exact:true}).click();
+    const dialog=ui.page.locator('dialog');await dialog.waitFor();const confirm=dialog.getByRole('button',{name:'Confirm Reset',exact:true});assert.equal(await confirm.isDisabled(),true);await dialog.locator('[name=confirm]').check();assert.equal(await confirm.isDisabled(),true);await dialog.locator('[name=reason]').fill('Approved audit test reset');assert.equal(await confirm.isEnabled(),true);await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
+   }finally{await ui.context.close();}
+  }
+
+  const reset=await api('super_admin',url,input);assert.equal(reset.status,200,JSON.stringify(reset.body));
+  const after=await database.collection('noDueRequests').findOne({_id:id});
+  for(const k of Object.keys(before).filter(k=>!['status','version'].includes(k)))assert.deepEqual(after[k],before[k],k);
+
+  if(index===0){const ui=await browserLogin('reset_safe');try{await ui.page.getByRole('link',{name:'Make Request Again',exact:true}).waitFor();assert.match(await ui.page.locator('#content').innerText(),/Administratively reset/);}finally{await ui.context.close();}}
+
+  assert.equal(after.status,'reset');assert.equal(after.previousStatus,status);assert.equal(after.resetBy,accounts.super_admin.uid);assert.ok(after.resetAt instanceof Date);
+  assert.equal(recordDigest(await database.collection('approvals').find({__parent:id}).toArray()),recordDigest(projections));
+  assert.equal((await api('super_admin',url,input)).body.duplicate,true);
+  assert.equal((await api('super_admin',url,{...input,requestKey:'different-reset-key'})).status,409);
+  assert.equal((await api('mentor','/api/requests/'+id+'/actions',{action:'mentor',decision:'approved'})).status,403);
+  const detail=await api('super_admin','/api/data/read',{path:'administrativeBackups/'+after.resetBackupId});assert.equal(detail.status,200);assert.ok(detail.body.data.data);
+  assert.equal((await api('admin','/api/data/read',{path:'administrativeBackups/'+after.resetBackupId})).status,403);
+ }
+ const newRequest=await api('reset_safe','/api/requests',{requestKey:'reset-final-fresh'});assert.equal(newRequest.status,200);const fresh=await database.collection('noDueRequests').findOne({_id:newRequest.body.id});assert.equal(fresh.status,'pending_stage1');assert.ok(Object.values(fresh.approvalStates).every(s=>s==='pending'));assert.equal(await database.collection('noDueRequests').countDocuments({studentId:created.uid,status:'reset'}),6);
+
+});
+
+test('student identity collisions require provenance and demo replacement never transfers credentials or personal history',async()=>{
+ const {recordDigest}=await import('../src/services/presentation-reset.js');
+ const fixture=await setupSafetyFixture();
+ const dummy={name:'Verified Dummy Student',usn:'REPLACEAUD01',auid:'DUMMYREPLACE01',collegeEmail:'replace-dummy@demo.test',phone:'9123456710',department:fixture.department,semester:5,section:'A',scheme:fixture.scheme,mentorEmail:fixture.mentorEmail};
+ const provisioned=await api('super_admin','/api/admin',{action:'provision',row:dummy,requestId:'replace-dummy-account'});assert.equal(provisioned.status,200,JSON.stringify(provisioned.body));const made=provisioned.body,uid=made.uid;
+ accounts.replace_dummy={uid,email:dummy.collegeEmail};await finishTemporary(dummy.collegeEmail);
+ const real={...dummy,name:'Official Roster Student',auid:'OFFICIALREPLACE01',collegeEmail:'replace-official@demo.test',phone:'9123456711'};
+ // AUID can only be changed through this proven-demo replacement, never ordinary reconciliation.
+ await database.collection('students').updateOne({_id:uid},{$unset:{auid:''}});
+ await database.collection('uniqueIdentities').deleteOne({_id:(await import('../src/services/student-import-reconciliation.js')).studentIdentityKey('auid',dummy.auid)});
+ const csv=async row=>api('super_admin','/api/college-import/preview',{type:'students',reconcileStudents:true,rows:[row],requestId:'replace-preview-'+Date.now()});
+ const ambiguous=await csv(real);assert.equal(ambiguous.status,200);assert.equal(ambiguous.body.rows[0].classification,'AMBIGUOUS');assert.equal(ambiguous.body.rows[0].identityReview.eligibleForReplacement,false);
+
+ for(const name of ['users','students'])await database.collection(name).updateOne({_id:uid},{$set:{name:real.name}});
+ const renamed=await csv(real);assert.equal(renamed.body.rows[0].classification,'AMBIGUOUS');assert.match(renamed.body.rows[0].error,/earlier import renamed/i);
+ for(const name of ['users','students'])await database.collection(name).updateOne({_id:uid},{$set:{name:dummy.name,dataOrigin:'production'}});
+ const protectedConflict=await csv(real);assert.equal(protectedConflict.body.rows[0].classification,'CONFLICT');
+ for(const name of ['users','students'])await database.collection(name).updateOne({_id:uid},{$set:{dataOrigin:'test'}});
+
+ const oldMark={_id:uid+'__'+fixture.offeringId,studentId:uid,offeringId:fixture.offeringId,teacherId:fixture.ids.subject_faculty,mentorId:fixture.ids.mentor,scores:{ia1:17},createdAt:new Date()};
+ await database.collection('marks').insertOne(oldMark);
+ const oldRequest=(await api('replace_dummy','/api/requests',{})).body.id;assert.ok(oldRequest);
+ for(const collection of ['users','students']){const current=await database.collection(collection).findOne({_id:uid});await database.collection('testDataRegistry').insertOne({_id:'replace-provenance-'+collection,collection,recordId:uid,origin:'test',evidence:'Isolated test created this exact identity',digest:recordDigest(current)});}
+ const classified=await csv(real);assert.equal(classified.body.rows[0].classification,'DEMO_REPLACEMENT');assert.equal(classified.body.rows[0].identityReview.eligibleForReplacement,true);
+
+ const ui=await browserLogin('super_admin');try{
+  await ui.page.evaluate(({uid,id})=>sessionStorage.setItem('department-context:'+uid,id),{uid:accounts.super_admin.uid,id:fixture.did});
+  await ui.page.goto('http://127.0.0.1:5051/super-admin-dashboard.html#students');await ui.page.locator('body.workspace-ready').waitFor();
+  const header=['name','usn','auid','collegeEmail','phone','department','semester','section','scheme','mentorEmail'];await ui.page.locator('#importFile').setInputFiles({name:'official-collision.csv',mimeType:'text/csv',buffer:Buffer.from(csvOf([real],header))});await ui.page.locator('#previewBtn').click();
+  await ui.page.locator('#importPreview details summary').click();assert.match(await ui.page.locator('#importPreview').innerText(),/Verified Dummy Student/);await ui.page.getByRole('button',{name:'Replace Demo Record With Real Student',exact:true}).click();
+  const dialog=ui.page.locator('dialog');await dialog.waitFor();const button=dialog.getByRole('button',{name:'Confirm replacement',exact:true});assert.equal(await button.isDisabled(),true);await dialog.locator('[name=demo]').check();await dialog.locator('[name=final]').check();assert.equal(await button.isDisabled(),true);await dialog.locator('[name=reason]').fill('Verified isolated test provisioning evidence');assert.equal(await button.isEnabled(),true);await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
+ }finally{await ui.context.close();}
+
+ const input={uid,row:real};
+ assert.equal((await api('admin','/api/student-replacements/preview',input)).status,403);
+ const preview=await api('super_admin','/api/student-replacements/preview',input);assert.equal(preview.status,200,JSON.stringify(preview.body));assert.equal(preview.body.counts.marks,1);
+ const before=recordDigest(await database.collection('students').findOne({_id:uid}));
+ const confirm={...input,fingerprint:preview.body.fingerprint,confirmation:true,finalConfirmation:true,reason:'Confirmed isolated dummy identity replacement'};
+ assert.equal((await api('super_admin','/api/student-replacements/confirm',{...confirm,confirmation:false})).status,400);
+ assert.equal(recordDigest(await database.collection('students').findOne({_id:uid})),before);
+ const result=await api('super_admin','/api/student-replacements/confirm',confirm);assert.equal(result.status,200,JSON.stringify(result.body));const next=result.body.uid;assert.notEqual(next,uid);
+ assert.equal((await auth.getUser(uid)).disabled,true);assert.equal((await auth.getUser(next)).email,real.collegeEmail);
+ assert.equal(await database.collection('students').countDocuments({usn:real.usn}),1);
+ assert.equal(await database.collection('users').countDocuments({_id:uid}),0);
+ assert.equal(await database.collection('marks').countDocuments({studentId:next}),0);assert.equal(await database.collection('noDueRequests').countDocuments({studentId:next}),0);
+ assert.equal(await database.collection('marks').countDocuments({_id:oldMark._id}),0);assert.equal(await database.collection('noDueRequests').countDocuments({_id:oldRequest}),0);
+ assert.equal((await database.collection('students').findOne({_id:next})).name,real.name);
+ assert.ok(await database.collection('studentIdentityArchives').findOne({oldUid:uid,newUid:next}));
+ assert.equal(await database.collection('enrollments').countDocuments({studentId:next,active:true}),1);
+ const retry=await api('super_admin','/api/student-replacements/confirm',confirm);assert.equal(retry.status,200);assert.equal(retry.body.uid,next);assert.equal(retry.body.duplicate,true);
+ const badLogin=await fetch('http://127.0.0.1:9298/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake-api-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:real.collegeEmail,password:passwords.get(dummy.collegeEmail)||'DemoPassword123!',returnSecureToken:true})});assert.equal(badLogin.status,400);
+ const again=await csv(real);assert.equal(again.body.errors,0,JSON.stringify(again.body));assert.equal(again.body.studentSummary.existing,1);
 });

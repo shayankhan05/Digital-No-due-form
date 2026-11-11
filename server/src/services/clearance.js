@@ -59,7 +59,7 @@ export async function enrollmentPlan(db,uid,{existingRequest=null}={}) {
     hodId:config.hodId,officeId:config.officeId,semester:student.semester,section:student.section};
 }
 export function migrateRequest(r,plan,projections={}) {
-  if(['issued','cleared'].includes(r.status) || r.workflowVersion===3) return null;
+  if(['issued','cleared','reset','cancelled','exited'].includes(r.status) || r.workflowVersion===3) return null;
   const oldItems=r.approvalItems || Object.fromEntries(Object.entries(projections).map(([id,item])=>[id,item]));
   const oldStates=r.approvalStates || Object.fromEntries(Object.entries(projections).map(([id,item])=>[id,item.status]));
   const states={},sources={};

@@ -3,7 +3,7 @@ import {departmentOf} from './department-master.js';
 import {isManager} from './roles.js';
 import {matchesStudent} from './clearance.js';
 export async function canRead(store,actor,path,data){
-  if(['workflowOverrides','presentationWorkflowArchives','presentationIdentityJournal'].includes(path.split('/')[0])&&actor.role!=='super_admin')return false;
+  if(['iseDemoRetirementJobs','administrativeBackups','studentReplacementJobs','studentIdentityArchives','workflowOverrides','presentationWorkflowArchives','presentationIdentityJournal'].includes(path.split('/')[0])&&actor.role!=='super_admin')return false;
   if(isManager(actor.role)){if(actor.managementDepartmentId&&path.split('/')[0]!=='settings'&&data.scope!=='institution'&&path!=='users/'+actor.uid&&(await departmentOf(store.database,path.split('/')[0],data))!==actor.managementDepartmentId)return false;if(path==='settings/institution'&&actor.role!=='super_admin')return false;return true;}const [collection,id,child]=path.split('/'),uid=actor.uid,role=actor.role;
   if(role==='office'&&actor.scope==='department'&&['noDueRequests','hallTickets'].includes(collection)){const record=collection==='noDueRequests'&&child?(await store.doc('noDueRequests/'+id).get()).data():data;const student=(await store.doc('students/'+record?.studentId).get()).data();if(!actor.departmentId||student?.departmentId!==actor.departmentId)return false;}
   if(actor.departmentId&&['users','students','subjects','offerings','enrollments','assignments'].includes(collection)&&data.scope!=='institution'){const target=await departmentOf(store.database,collection,data);if(target&&target!==actor.departmentId)return false;}

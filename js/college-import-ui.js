@@ -8,11 +8,29 @@ import {auth} from './firebase-config.js';
 export function mountCollegeImport(){
  const $=id=>document.getElementById(id);let preview=[],jobId=null,page=0,results=[],running=false,studentSummary=null,requiresReactivation=false,jobState='ready',retryRevision=0;
  const defaultImportLabel=$('importBtn').textContent;const reset=()=>{$('importBtn').textContent=defaultImportLabel;preview=[];jobId=null;results=[];studentSummary=null;requiresReactivation=false;jobState='ready';retryRevision=0;$('reactivateStudents').checked=false;$('studentReactivateOption').hidden=true;$('importPreview').replaceChildren();$('importResults').replaceChildren();$('acceptWarnings').checked=false;$('importBtn').disabled=true;$('downloadReport').disabled=true;$('importProgress').textContent='';};
+ let superAdmin=false;apiFetch('/api/auth/profile').then(p=>{superAdmin=p.role==='super_admin';if(preview.length)draw();}).catch(()=>{});
  const studentMode=()=>$('importType').value==='students';
  const tracksJob=()=>studentMode()||$('importType').value==='teaching';
- const studentTotals=()=>studentSummary?`<p>New: ${studentSummary.new} · Existing: ${studentSummary.existing} · Inactive: ${studentSummary.inactive} · Conflicts: ${studentSummary.conflicts}</p><p>Existing mentor changes: ${studentSummary.mentorChanges} · Existing section changes: ${studentSummary.sectionChanges} · Academic changes deferred: ${studentSummary.deferred}</p>`:'';
+ const studentTotals=()=>studentSummary?`<p>New: ${studentSummary.new} ï¿½ Existing: ${studentSummary.existing} ï¿½ Inactive: ${studentSummary.inactive} ï¿½ Conflicts: ${studentSummary.conflicts}</p><p>Existing mentor changes: ${studentSummary.mentorChanges} ï¿½ Existing section changes: ${studentSummary.sectionChanges} ï¿½ Academic changes deferred: ${studentSummary.deferred}</p>`:'';
  const studentDetail={NEW:'Create student',EXISTING:'Safe to update existing account',INACTIVE:'Safe to reactivate and reconcile'};
- const draw=()=>{$('importPreview').innerHTML=`<p>${preview.length} rows Â· ${preview.filter(r=>r.status==='VALID').length} valid Â· ${preview.filter(r=>r.status==='WARNING').length} warnings Â· ${preview.filter(r=>r.status==='ERROR').length} error rows Â· ${preview.filter(r=>r.duplicate).length} duplicates</p>${studentTotals()}<div class="table-scroll" tabindex="0" role="region" aria-label="Import preview"><table${tracksJob()?' class="teaching-preview-table"':''}><thead><tr><th>#</th><th>Name / subject</th><th>Email / teacher</th><th>USN / employee / section</th><th>Status</th><th>Details</th></tr></thead><tbody>${preview.slice(page*50,(page+1)*50).map(r=>`<tr><td>${r.index+1}</td><td>${e(r.row.name||r.row.subjectName)}</td><td>${e(r.row.collegeEmail||r.row.teacherEmail)}</td><td>${e(r.row.usn||r.row.employeeId||r.row.section)}${r.row.auid?' Â· AUID: '+e(r.row.auid):''}</td><td>${e(r.classification||r.status)}</td><td>${e(r.error||[studentDetail[r.classification],...(r.warnings||[])].filter(Boolean).join('. ')||'Ready')}${r.inactiveUid?`<br><button class="btn-sm" data-reactivate-account="${e(r.inactiveUid)}" data-kind="${$('importType').value==='students'?'student':'faculty'}">Reactivate existing account</button>`:''}</td></tr>`).join('')}</tbody></table></div>`;wireAccountReactivation($('importPreview'),async()=>{$('previewBtn').click();});$('previewPrevious').hidden=page===0;$('previewNext').hidden=(page+1)*50>=preview.length;};
+
+ function identityDetails(r){
+  const v=r.identityReview;if(!v)return '';
+  const fields=[['name','Name'],['usn','USN'],['auid','AUID'],['email','Email'],['phone','Phone'],['section','Section'],['semester','Semester'],['mentorId','Mentor UID'],['mentorEmployeeId','Mentor Employee ID']];
+  return '<details><summary>Review identity collision</summary><p>'+e(v.reason)+(v.priorNames?' Â· Earlier identity: '+e(v.priorNames.join(', ')):'')+'</p><dl>'+fields.map(([key,label])=>'<dt><strong>'+label+'</strong></dt><dd>Existing: '+e(v.existing[key]??'â€”')+'<br>Incoming: '+e(v.incoming[key]??'â€”')+'</dd>').join('')+'</dl><p>Firebase: '+(v.firebase.exists?v.firebase.disabled?'Disabled':'Enabled':'Missing')+' Â· '+e(v.firebase.uid||'')+'</p><p>Current mappings: '+e(v.mappings.map(m=>m.offeringId+' (teacher '+m.teacherId+')').join('; ')||'None')+'</p>'+(superAdmin&&v.eligibleForReplacement?'<button type="button" class="btn-sm" data-replace-demo="'+r.index+'">Replace Demo Record With Real Student</button>':'<p>Blocked: manual review required.</p>')+'</details>';
+ }
+ async function reviewReplacement(index){
+  const r=preview.find(r=>r.index===index),v=r?.identityReview;if(!v||!superAdmin)return;
+  try{
+   const plan=await post('/api/student-replacements/preview',{uid:v.uid,row:r.row}),dialog=document.createElement('dialog');dialog.className='card';
+   dialog.innerHTML='<form><h3>Replace Demo Record With Real Student</h3><p>'+e(plan.existing.name)+' â†’ '+e(plan.incoming.name)+' Â· '+e(plan.incoming.usn)+' Â· AUID '+e(plan.incoming.auid)+'</p><p>'+e(plan.preservation)+'</p><p>Records archived: '+e(Object.entries(plan.counts).map(([name,n])=>name+': '+n).join(', '))+'</p><label>Mandatory reason and test provenance evidence<textarea name="reason" minlength="10" maxlength="2000" required></textarea></label><label class="confirmation-row"><input type="checkbox" name="demo" required> I confirm that the existing record is verified demo/test data.</label><label class="confirmation-row"><input type="checkbox" name="final" required> I confirm the real identity and separate Firebase account. Dummy personal records will not be transferred.</label><p role="alert"></p><div class="provision-actions"><button class="btn-primary" disabled>Confirm replacement</button><button type="button" class="btn-sm">Cancel</button></div></form>';
+   document.body.append(dialog);dialog.showModal();dialog.addEventListener('close',()=>dialog.remove());dialog.querySelector('[type=button]').onclick=()=>dialog.close();const form=dialog.querySelector('form'),button=form.querySelector('button');
+   form.oninput=()=>button.disabled=form.elements.reason.value.trim().length<10||!form.elements.demo.checked||!form.elements.final.checked;
+   form.onsubmit=async event=>{event.preventDefault();button.disabled=true;try{const out=await post('/api/student-replacements/confirm',{uid:v.uid,row:r.row,fingerprint:plan.fingerprint,reason:form.elements.reason.value,confirmation:form.elements.demo.checked,finalConfirmation:form.elements.final.checked});dialog.close();$('importProgress').textContent='Demo replacement completed. Activation: '+out.activation+'. Validate the CSV again before import.';reset();$('previewBtn').click();}catch(error){dialog.querySelector('[role=alert]').textContent=error.message;button.disabled=false;}};
+  }catch(error){$('importProgress').textContent=error.message;}
+ }
+
+ const draw=()=>{$('importPreview').innerHTML=`<p>${preview.length} rows Â· ${preview.filter(r=>r.status==='VALID').length} valid Â· ${preview.filter(r=>r.status==='WARNING').length} warnings Â· ${preview.filter(r=>r.status==='ERROR').length} error rows Â· ${preview.filter(r=>r.duplicate).length} duplicates</p>${studentTotals()}<div class="table-scroll" tabindex="0" role="region" aria-label="Import preview"><table${tracksJob()?' class="teaching-preview-table"':''}><thead><tr><th>#</th><th>Name / subject</th><th>Email / teacher</th><th>USN / employee / section</th><th>Status</th><th>Details</th></tr></thead><tbody>${preview.slice(page*50,(page+1)*50).map(r=>`<tr><td>${r.index+1}</td><td>${e(r.row.name||r.row.subjectName)}</td><td>${e(r.row.collegeEmail||r.row.teacherEmail)}</td><td>${e(r.row.usn||r.row.employeeId||r.row.section)}${r.row.auid?' Â· AUID: '+e(r.row.auid):''}</td><td>${e(({DEMO_REPLACEMENT:'DEMO',AMBIGUOUS:'REVIEW'})[r.classification]||r.classification||r.status)}</td><td>${e(r.error||[studentDetail[r.classification],...(r.warnings||[])].filter(Boolean).join('. ')||'Ready')}${identityDetails(r)}${r.inactiveUid?`<br><button class="btn-sm" data-reactivate-account="${e(r.inactiveUid)}" data-kind="${$('importType').value==='students'?'student':'faculty'}">Reactivate existing account</button>`:''}</td></tr>`).join('')}</tbody></table></div>`;for(const button of $('importPreview').querySelectorAll('[data-replace-demo]'))button.onclick=()=>reviewReplacement(Number(button.dataset.replaceDemo));wireAccountReactivation($('importPreview'),async()=>{$('previewBtn').click();});$('previewPrevious').hidden=page===0;$('previewNext').hidden=(page+1)*50>=preview.length;};
  const controls=['importFile','importType','previewBtn','acceptWarnings','reactivateStudents','keepStudentPlacement'];
  const storageKey=()=>auth.currentUser&&$('importType').value+'-import:'+auth.currentUser.uid+':'+(sessionStorage.getItem('department-context:'+auth.currentUser.uid)||'');
  const remember=id=>{const key=storageKey();if(key){if(id)sessionStorage.setItem(key,id);else sessionStorage.removeItem(key);}};
@@ -27,8 +45,8 @@ export function mountCollegeImport(){
  const showImportResult=outcome=>{
   results=outcome.results;
   const label=outcome.status==='completed'?'Completed':'Failed';
-  $('importProgress').textContent=label+' · '+(outcome.total-outcome.errors)+'/'+outcome.total+' rows completed · '+outcome.errors+' failed or skipped.';
-  $('importResults').innerHTML=`<p>Rows read: ${outcome.total} · Created: ${outcome.created} · Existing / safely updated: ${outcome.existing} · Failed: ${outcome.errors}</p>${studentMode()?`<p>Reactivated: ${results.filter(r=>r.reactivated&&!r.error).length} · Mentor mappings: ${outcome.mentorMappings}/${outcome.total} · Subject mappings: ${outcome.subjectsMapped}</p>`:''}${results.filter(r=>r.error).slice(0,50).map(r=>`<p>CSV row ${r.index+2} · ${e(r.identifier)}: ${e(r.error)}</p>`).join('')}`;
+  $('importProgress').textContent=label+' ï¿½ '+(outcome.total-outcome.errors)+'/'+outcome.total+' rows completed ï¿½ '+outcome.errors+' failed or skipped.';
+  $('importResults').innerHTML=`<p>Rows read: ${outcome.total} ï¿½ Created: ${outcome.created} ï¿½ Existing / safely updated: ${outcome.existing} ï¿½ Failed: ${outcome.errors}</p>${studentMode()?`<p>Reactivated: ${results.filter(r=>r.reactivated&&!r.error).length} ï¿½ Mentor mappings: ${outcome.mentorMappings}/${outcome.total} ï¿½ Subject mappings: ${outcome.subjectsMapped}</p>`:''}${results.filter(r=>r.error).slice(0,50).map(r=>`<p>CSV row ${r.index+2} ï¿½ ${e(r.identifier)}: ${e(r.error)}</p>`).join('')}`;
   $('downloadReport').disabled=false;
  };
  const requestOptions=()=>({signal:AbortSignal.timeout(12000)});
@@ -39,7 +57,7 @@ export function mountCollegeImport(){
   const retryFailed=jobState==='failed';
   try{
    if(start){
-    $('importProgress').textContent='Submitting the import…';
+    $('importProgress').textContent='Submitting the importï¿½';
     remember(jobId);
     try{
      outcome=await apiFetch('/api/college-import/confirm',{...requestOptions(),method:'POST',body:JSON.stringify({jobId,confirmation:true,background:true,retryFailed,retryRevision,reactivateStudents:$('reactivateStudents').checked})});
@@ -54,7 +72,7 @@ export function mountCollegeImport(){
      try{outcome=await apiFetch('/api/college-import/jobs/'+jobId,requestOptions());}
      catch(error){
       if(['permission-denied','unauthenticated','invalid-argument','department/inactive'].includes(error.code))throw error;
-      $('importProgress').textContent='Connection interrupted · Checking import status…';
+      $('importProgress').textContent='Connection interrupted ï¿½ Checking import statusï¿½';
       await new Promise(resolve=>setTimeout(resolve,3000));
       continue;
      }
@@ -67,13 +85,13 @@ export function mountCollegeImport(){
     $('studentReactivateOption').hidden=!requiresReactivation;
     if(jobState==='queued'||jobState==='running'){
      const label=jobState==='queued'?'Queued':'Running';
-     $('importProgress').textContent=`${label} · ${outcome.processed}/${outcome.total} rows processed. Import is still running in the background.`;
+     $('importProgress').textContent=`${label} ï¿½ ${outcome.processed}/${outcome.total} rows processed. Import is still running in the background.`;
     }else{
      if(jobState==='completed'||jobState==='failed'){
       showImportResult(outcome);
       if(jobState==='completed')window.dispatchEvent(new Event('institution:masters-changed'));
      }else if(outcome.safeToResume){
-      $('importProgress').textContent=`Interrupted · ${outcome.processed}/${outcome.total} rows saved. Safe to resume.`;
+      $('importProgress').textContent=`Interrupted ï¿½ ${outcome.processed}/${outcome.total} rows saved. Safe to resume.`;
      }else{
       if(!preview.length)$('acceptWarnings').checked=false;
       $('importProgress').textContent='Preview ready. Review relationships and confirm the entire file.';

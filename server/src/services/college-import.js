@@ -76,7 +76,7 @@ export function collegeImportRoutes(app,{database,client,store,auth,provisionerO
   if(!errors){
    if(background){
     const existing=await matchingImportJob(req.actor,type,digest);
-    id=existing?._id||hash(type+':'+req.actor.uid+':'+digest);
+    id=existing?._id||hash(type+':'+req.actor.uid+':'+digest+((await jobs.countDocuments({actorUid:req.actor.uid,type,digest,identitySuperseded:true}))?':identity-generation-'+await jobs.countDocuments({actorUid:req.actor.uid,type,digest,identitySuperseded:true}):''));
    }
    const old=await jobs.findOne({_id:id});
    if(old&&old.digest!==digest)fail('Import request ID belongs to another file.','already-exists');
@@ -86,7 +86,7 @@ export function collegeImportRoutes(app,{database,client,store,auth,provisionerO
    new:preview.filter(r=>r.status!=='ERROR'&&r.classification==='NEW').length,
    existing:preview.filter(r=>r.status!=='ERROR'&&r.classification==='EXISTING').length,
    inactive:preview.filter(r=>r.status!=='ERROR'&&r.classification==='INACTIVE').length,
-   conflicts:preview.filter(r=>r.classification==='CONFLICT').length,
+   conflicts:preview.filter(r=>['CONFLICT','AMBIGUOUS','DEMO_REPLACEMENT'].includes(r.classification)).length,
    mentorChanges:preview.filter(r=>r.status!=='ERROR'&&r.changes?.mentor).length,
    sectionChanges:preview.filter(r=>r.status!=='ERROR'&&r.changes?.section).length,
    deferred:preview.filter(r=>r.status!=='ERROR'&&r.changes?.academicDeferred).length,
@@ -99,13 +99,14 @@ export function collegeImportRoutes(app,{database,client,store,auth,provisionerO
  const hasLease=job=>job.leaseUntil>Date.now();
  const priority=job=>hasLease(job)?3:job.state==='complete'?2:job.offset||job.results.length?1:0;
  async function matchingImportJob(actor,type,digest){
-  const matches=await jobs.find({actorUid:actor.uid,departmentId:actor.managementDepartmentId||null,type,digest}).toArray();
+  const matches=await jobs.find({actorUid:actor.uid,departmentId:actor.managementDepartmentId||null,type,digest,identitySuperseded:{$ne:true}}).toArray();
   return matches.sort((a,b)=>priority(b)-priority(a)||b.results.length-a.results.length||b.createdAt-a.createdAt)[0];
  }
  async function ownedJob(actor,id){
   if(!/^[a-f0-9]{64}$/.test(id||''))fail('Validate and confirm this CSV first.');
   const job=await jobs.findOne({_id:id});
   if(!job||job.actorUid!==actor.uid||(job.departmentId||null)!==(actor.managementDepartmentId||null))fail('Import belongs to another administrator/department.','permission-denied');
+  if(job.identitySuperseded)fail('An identity in this import was replaced. Validate the CSV again.');
   if(job.type==='teaching'&&job.supersededBy){
    const completed=await jobs.findOne({_id:job.supersededBy,actorUid:actor.uid,departmentId:job.departmentId,type:job.type,digest:job.digest});
    if(completed)return completed;
@@ -124,7 +125,7 @@ export function collegeImportRoutes(app,{database,client,store,auth,provisionerO
   const type=req.query.type==='students'?'students':'teaching';
   const job=await jobs.findOne({
    actorUid:req.actor.uid,departmentId:req.actor.managementDepartmentId||null,type,...(type==='students'?{studentOptions:{$exists:true}}:{}),
-   supersededBy:{$exists:false},updatedAt:{$exists:true},
+   identitySuperseded:{$ne:true},supersededBy:{$exists:false},updatedAt:{$exists:true},
   },{sort:{updatedAt:-1}});
   res.set('Cache-Control','no-store').json(job?status(await matchingImportJob(req.actor,job.type,job.digest)||job):null);
  });

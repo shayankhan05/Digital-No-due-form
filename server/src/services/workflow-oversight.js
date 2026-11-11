@@ -1,4 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
+import {resetNoDueRequest,resettableStatuses} from './request-reset.js';
 import {departmentOf} from './department-master.js';
 import {stageReady,recomputeEffectiveWorkflow,effectiveRequest} from './workflow-model.js';
 const fail=(message,code='invalid-argument')=>{throw Object.assign(new Error(message),{code});};
@@ -16,7 +17,7 @@ export async function workflowTimeline(store,raw){
   const decision=key==='office'?officeDecision(r):r[key+'Approval']||{status:'pending'};
   rows.push({key,stage:key==='mentor'?'Stage 2':key==='hod'?'Stage 3':'Stage 4',label:key==='office'?'Department Office':key==='hod'?'HOD':'Mentor',actor:await person(r[key+'Id']),original,effective:decision.status,locked:!stageReady(r,key)});
  }
- for(const row of rows){row.override=r.effectiveOverrides?.[row.key]||null;row.originalActor=await person(row.original.actorId||row.original.actedById||raw[row.key+'Id']);row.overrideActor=row.override?await person(row.override.actorId):null;row.suspended=row.locked&&['approved','rejected'].includes(row.effective);row.canOverride=!['cancelled','exited'].includes(r.status)&&['approved','rejected'].includes(row.effective)&&!row.locked;}
+ for(const row of rows){row.override=r.effectiveOverrides?.[row.key]||null;row.originalActor=await person(row.original.actorId||row.original.actedById||raw[row.key+'Id']);row.overrideActor=row.override?await person(row.override.actorId):null;row.suspended=row.locked&&['approved','rejected'].includes(row.effective);row.canOverride=!['cancelled','exited','reset'].includes(r.status)&&['approved','rejected'].includes(row.effective)&&!row.locked;}
  return rows;
 }
 export async function overrideDecision(store,actor,id,input){
@@ -28,7 +29,7 @@ export async function overrideDecision(store,actor,id,input){
   const ref=tx.store.doc('noDueRequests/'+id),raw=(await tx.get(ref)).data();if(!raw)fail('Request not found.');
   if(actor.managementDepartmentId&&await departmentOf(tx.store.database,'noDueRequests',raw)!==actor.managementDepartmentId)fail('Request belongs to another department.','permission-denied');
   const old=await tx.get(tx.store.doc('workflowOverrides/'+overrideId));if(old.exists)return;
-  if(['cancelled','exited'].includes(raw.status))fail('Cancelled requests are read-only.');
+  if(['cancelled','exited','reset'].includes(raw.status))fail('Cancelled requests are read-only.');
   if((raw.version||0)!==version)fail('Request changed. Reload before overriding.','already-exists');
   const latest=await tx.store.database.collection('noDueRequests').findOne({studentId:raw.studentId},{session:tx.store.session,sort:{createdAt:-1,_id:-1}});
   if(latest?._id!==id)fail('A newer request exists. Historical requests are read-only.');
@@ -54,7 +55,7 @@ export async function overrideDecision(store,actor,id,input){
   tx.set(tx.store.doc(`users/${r.studentId}/notifications/${id}_override_${overrideId}`),{requestId:id,studentId:r.studentId,type:'super_admin_override',message:`${item?.label||approvalId}: ${decision}. ${reason}`,reason,decision,actorName:event.actorName,actorType:'super_admin',approvalType:item?.approverType||approvalId,read:false,createdAt:at});
  });return {saved:true,overrideId};
 }
-export function oversightRoutes(app,{store,database}){
+export function oversightRoutes(app,{store,database,backupKey}){
  const superOnly=actor=>{if(actor.role!=='super_admin')fail('Super Admin access required.','permission-denied');};
  app.get('/api/oversight/requests',async(req,res)=>{
   superOnly(req.actor);const departmentId=req.actor.managementDepartmentId||req.query.departmentId;
@@ -64,7 +65,7 @@ export function oversightRoutes(app,{store,database}){
   const students=await database.collection('students').find({departmentId},{projection:{_id:1,auid:1}}).toArray();
   q.$or=[{departmentId},{departmentId:{$in:[null,'']},department:{$in:[department.code,department.name]}},{departmentId:{$in:[null,'']},department:{$in:[null,'']},studentId:{$in:students.map(s=>s._id)}}];
   if(term){const rx=term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');q.$and=[{$or:[...['_id','studentName','usn','auid'].map(f=>({[f]:{$regex:rx,$options:'i'}})),{studentId:{$in:students.filter(s=>s.auid?.includes(term.toUpperCase())).map(s=>s._id)}}]}];}
-  if(req.query.status){if(!['pending_stage1','pending_mentor','pending_hod','cleared','rejected','issued'].includes(req.query.status))fail('Invalid status.');q.status=req.query.status;}
+  if(req.query.status){if(!['pending_stage1','pending_mentor','pending_hod','cleared','rejected','issued','reset'].includes(req.query.status))fail('Invalid status.');q.status=req.query.status;}
   if(req.query.date){const from=new Date(req.query.date);if(!Number.isFinite(+from))fail('Invalid date.');q.createdAt={$gte:from,$lt:new Date(+from+86400000)};}
   const page=Math.max(1,Number(req.query.page)||1);if(!Number.isSafeInteger(page)||page>10000)fail('Invalid page.');
   const total=await database.collection('noDueRequests').countDocuments(q),rows=await database.collection('noDueRequests').find(q).sort({createdAt:-1,_id:1}).skip((page-1)*20).limit(20).toArray();
@@ -75,7 +76,8 @@ export function oversightRoutes(app,{store,database}){
   superOnly(req.actor);const raw=await database.collection('noDueRequests').findOne({_id:req.params.id});if(!raw)fail('Request not found.');
   if(req.actor.managementDepartmentId&&await departmentOf(database,'noDueRequests',raw)!==req.actor.managementDepartmentId)fail('Wrong department.','permission-denied');
   const overrides=await database.collection('workflowOverrides').find({requestId:raw._id}).sort({at:1,_id:1}).toArray();
-  const latest=await database.collection('noDueRequests').findOne({studentId:raw.studentId},{sort:{createdAt:-1,_id:-1}}),timeline=await workflowTimeline(store,raw);if(latest?._id!==raw._id)for(const row of timeline)row.canOverride=false;res.json({id:raw._id,studentName:raw.studentName,usn:raw.usn,auid:raw.auid||(await store.doc('students/'+raw.studentId).get()).data()?.auid,status:raw.status,createdAt:raw.createdAt,version:raw.version||0,timeline,overrides});
+  const latest=await database.collection('noDueRequests').findOne({studentId:raw.studentId},{sort:{createdAt:-1,_id:-1}}),timeline=await workflowTimeline(store,raw);if(latest?._id!==raw._id)for(const row of timeline)row.canOverride=false;res.json({id:raw._id,studentName:raw.studentName,usn:raw.usn,auid:raw.auid||(await store.doc('students/'+raw.studentId).get()).data()?.auid,status:raw.status,createdAt:raw.createdAt,version:raw.version||0,canReset:latest?._id===raw._id&&resettableStatuses.includes(raw.status),resetReason:raw.resetReason,resetAt:raw.resetAt,timeline,overrides});
  });
+ app.post('/api/oversight/requests/:id/reset',async(req,res)=>res.json(await resetNoDueRequest({store,actor:req.actor,id:req.params.id,input:req.body,backupKey})));
  app.post('/api/oversight/requests/:id/override',async(req,res)=>res.json(await overrideDecision(store,req.actor,req.params.id,req.body)));
 }
