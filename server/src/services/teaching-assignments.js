@@ -1,3 +1,4 @@
+import {assertInputSemester,assertRecordSemester,semesterMatch} from './semester-context.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {EJSON} from 'bson';
 import {isFaculty} from '../../../js/capabilities.js';
@@ -31,13 +32,13 @@ async function context(db,actor,id,session){
  if(!dep||dep.status!=='active')fail('Choose an active department.');
  return {dep,user};
 }
-async function catalog(db,dep,session){
- const scope=classScope(dep),subjects=await read(db,'subjects',{...scope,active:{$ne:false}},session);
+async function catalog(db,dep,session,actor){
+ const scope=classScope(dep),subjects=await read(db,'subjects',{...scope,...await semesterMatch(db,actor,'subjects'),active:{$ne:false}},session);
  const schemes=(await read(db,'schemes',{status:'active'},session)).filter(s=>(s.scope==='institution'||s.departmentIds?.includes(dep._id))&&(!dep.schemeIds?.length||dep.schemeIds.includes(s._id)));
  const allowed=new Set(schemes.map(s=>s.code));
  const faculty=(await read(db,'users',scope,session)).filter(u=>eligible(u)&&departmentCode(u.department)===dep.code);
  const policy=await db.collection('institutionPolicy').findOne({_id:'institution'},{session});
- return {subjects:subjects.filter(s=>allowed.has(String(s.scheme))),faculty,sections:studentSectionCodes(policy||{},dep)};
+ return {subjects:subjects.filter(s=>allowed.has(String(s.scheme))),faculty,sections:studentSectionCodes(policy||{},dep,actor.managementSemester)};
 }
 const itemReference=(field,id)=>({$expr:{$in:[id,{$map:{input:{$objectToArray:{$ifNull:['$'+field,{}]}},as:'item',in:'$$item.v.offeringId'}}]}});
 function itemFor(items,offering){
@@ -62,6 +63,7 @@ async function plan(db,actor,input,session){
  if(operation.startsWith('subject-')){
   const subject=await db.collection('subjects').findOne({_id:identifier(input.subjectId)?input.subjectId:null,...scope},{session});
   if(!subject||departmentCode(subject.department)!==dep.code)fail('Subject not found in this department.','permission-denied');
+  await assertRecordSemester(db,actor,'subjects',subject);
   const linked=await read(db,'offerings',{$or:[{subjectId:subject._id},{department:dep.code,scheme:subject.scheme,subjectCode:subject.code}]},session);
   const active=linked.filter(o=>o.active!==false).length;
   const history=await references(db,session,subject._id,subject);
@@ -71,12 +73,13 @@ async function plan(db,actor,input,session){
  }
  const old=operation==='add'?null:await db.collection('offerings').findOne({_id:identifier(input.offeringId)?input.offeringId:null,...scope},{session});
  if(operation!=='add'&&!old)fail('Assignment not found in this department.','permission-denied');
+ if(old)await assertRecordSemester(db,actor,'offerings',old);
  if(old&&departmentCode(old.department)!==dep.code)fail('Assignment department does not match.','permission-denied');
  if(operation==='deactivate'&&old.active===false)fail('This assignment is already inactive.');
  let teacher,subject,next,relocate=false;
  if(['remove','deactivate'].includes(operation))next={...old,active:false};
  else{
-  const options=await catalog(db,dep,session),semester=assertSemester(input.semester),section=input.section;
+  const options=await catalog(db,dep,session,actor),semester=assertSemester(input.semester),section=input.section;assertInputSemester(actor,input);
   subject=options.subjects.find(s=>s._id===input.subjectId);
   teacher=options.faculty.find(f=>f._id===input.teacherId);
   if(!subject||input.scheme!==undefined&&String(subject.scheme)!==input.scheme||!teacher||typeof section!=='string'||!options.sections.includes(section))fail('Choose an active subject, section, and eligible teacher in this department.');
@@ -155,11 +158,11 @@ export function teachingAssignmentRoutes(app,{database,client,auth,provisionerOp
  const path='/api/administration/teaching-assignments';
  app.get(path,async(req,res)=>{
   const {dep}=await context(database,req.actor,req.query.departmentId),scope=classScope(dep);
-  const options=await catalog(database,dep),offerings=await read(database,'offerings',scope);
-  const masters=await read(database,'subjects',scope);
+  const options=await catalog(database,dep,undefined,req.actor),offerings=await read(database,'offerings',{...scope,...await semesterMatch(database,req.actor,'offerings')});
+  const masters=await read(database,'subjects',{...scope,...await semesterMatch(database,req.actor,'subjects')});
   const staff=await read(database,'users',scope),staffById=new Map(staff.map(u=>[u._id,u]));
   const stats=await database.collection('enrollments').aggregate([{$match:{active:true,offeringId:{$in:offerings.map(o=>o._id)}}},{$group:{_id:'$offeringId',count:{$sum:1}}}]).toArray(),counts=new Map(stats.map(s=>[s._id,s.count]));
-  res.json({masters:masters.map(s=>({id:s._id,code:s.code,name:s.name,scheme:s.scheme,semester:s.semester,active:s.active!==false,activeOfferings:offerings.filter(o=>o.subjectId===s._id&&o.active!==false).length})),faculty:options.faculty.map(facultyView),subjects:options.subjects.map(s=>({id:s._id,code:s.code,name:s.name,scheme:s.scheme,semester:s.semester})),sections:options.sections,offerings:offerings.map(o=>({id:o._id,subjectId:o.subjectId,code:o.subjectCode,name:o.subjectName,semester:o.semester,section:o.section,scheme:o.scheme,teacherId:o.teacherId,teacher:staffById.has(o.teacherId)?facultyView(staffById.get(o.teacherId)):null,enrolled:counts.get(o._id)||0,active:o.active!==false,components:o.components?.length||0})),students:await database.collection('students').countDocuments({...scope,accountStatus:{$nin:['inactive','exited','deleting','deleted','exiting','deactivating']}})});
+  res.json({masters:masters.map(s=>({id:s._id,code:s.code,name:s.name,scheme:s.scheme,semester:s.semester,active:s.active!==false,activeOfferings:offerings.filter(o=>o.subjectId===s._id&&o.active!==false).length})),faculty:options.faculty.map(facultyView),subjects:options.subjects.map(s=>({id:s._id,code:s.code,name:s.name,scheme:s.scheme,semester:s.semester})),sections:options.sections,offerings:offerings.map(o=>({id:o._id,subjectId:o.subjectId,code:o.subjectCode,name:o.subjectName,semester:o.semester,section:o.section,scheme:o.scheme,teacherId:o.teacherId,teacher:staffById.has(o.teacherId)?facultyView(staffById.get(o.teacherId)):null,enrolled:counts.get(o._id)||0,active:o.active!==false,components:o.components?.length||0})),students:await database.collection('students').countDocuments({...scope,...await semesterMatch(database,req.actor,'students'),accountStatus:{$nin:['inactive','exited','deleting','deleted','exiting','deactivating']}})});
  });
  app.post(path+'/preview',async(req,res)=>{
   const session=client.startSession();try{let reviewed;await session.withTransaction(async()=>{reviewed=await plan(database,req.actor,req.body,session);},{readConcern:{level:'snapshot'}});res.json(reviewed.summary);}finally{await session.endSession();}

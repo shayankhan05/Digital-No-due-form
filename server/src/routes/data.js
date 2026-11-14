@@ -1,3 +1,4 @@
+import {assertRecordSemester,assertInputSemester,cohortCollections} from '../services/semester-context.js';
 import {phoneError} from '../../../js/phone.js';
 import {assertSemester} from '../../../js/semester.js';
 import {isMentor,isFaculty} from '../../../js/capabilities.js';
@@ -22,13 +23,21 @@ export async function saveMark(store,actor,id,data){
   });
 }
 async function validateAdmin(store,path,data,actor){
-  const [collection]=path.split('/');
+  const [collection,parentId,child]=path.split('/');
+  if(child)await assertDepartment(store,actor,collection,{...(await store.doc(collection+'/'+parentId).get()).data(),_id:parentId});
   if (['users','students'].includes(collection) && Object.hasOwn(data,'phone')) {
     const error = phoneError(data.phone);
     if (error) throw Object.assign(new Error(error), {code:'invalid-argument'});
   }
   if(['users','students'].includes(collection)&&(await store.doc('superAdminAudit/deleted_account_'+path.split('/')[1]).get()).exists)forbidden();
   const previous=(await store.doc(path).get()).data();
+  if(previous)await assertRecordSemester(store.database,actor,collection,{...previous,_id:path.split('/')[1]});
+  if((cohortCollections.has(collection)||collection==='users'&&(data.role||previous?.role)==='student')&&Object.hasOwn(data,'semester'))assertInputSemester(actor,data);
+  await assertRecordSemester(store.database,actor,collection,{...previous,...data,_id:path.split('/')[1]});
+  if(cohortCollections.has(collection)){
+   const candidate={...previous,...data};
+   for(const [field,target]of [['offeringId','offerings'],['studentId','students'],['requestId','noDueRequests']])if(candidate[field])await assertDepartment(store,actor,target,await store.database.collection(target).findOne({_id:candidate[field]}));
+  }
   if(collection==='students'&&Object.hasOwn(data,'auid')&&data.auid!==previous?.auid)throw Object.assign(new Error('Set AUID through student provisioning.'),{code:'invalid-argument'});if(previous)await assertDepartment(store,actor,collection,previous);if(actor.managementDepartmentId){const candidate={...previous,...data};if(!candidate.departmentId&&candidate.scope!=='institution')candidate.departmentId=await departmentOf(store.database,collection,candidate);await assertDepartment(store,actor,collection,candidate);}
   if(actor.role==='admin'&&actor.managementDepartmentId&&collection==='users'&&(!['student','subject_faculty','mentor'].includes(data.role||previous?.role)||previous?.scope==='institution'))forbidden();if(path==='settings/institution'||actor.role==='admin'&&collection==='settings'&&path!=='settings/workflow')forbidden();if(collection==='users'&&previous&&['admin','hod','super_admin'].includes(previous.role)&&data.role&&data.role!==previous.role)forbidden();if(collection==='settings'&&actor.managementDepartmentId&&actor.role==='super_admin')throw new Error('Use the department Workflow Setup form.');
   if(collection==='users'&&actor.role!=='super_admin'&&(data.role==='super_admin'||(await store.doc(path).get()).data()?.role==='super_admin'))forbidden();
@@ -58,7 +67,7 @@ async function validateAdmin(store,path,data,actor){
   if(/"(password|passwordHash|privateKey)"\s*:/.test(JSON.stringify(data)))throw new Error('Credentials are not application data.');
   if(collection==='users'&&data.role&&!['super_admin','admin','student','subject_faculty','mentor','hod','office','library','accounts','physics_lab','chemistry_lab','sports'].includes(data.role))throw new Error('Invalid role.');
   if(collection==='students'&&!path.includes('/clearance/')){if(data.mentorId&&!isMentor((await store.doc(`users/${data.mentorId}`).get()).data()))throw new Error('Invalid mentor.');}
-  if(collection==='offerings'){const previous=(await store.doc(path).get()).data(),o={...previous,...data};if(isInactive((await store.doc(`users/${o.teacherId}`).get()).data())||!isFaculty((await store.doc(`users/${o.teacherId}`).get()).data())||!(await store.doc(`subjects/${o.subjectId}`).get()).exists)throw new Error('Invalid subject/teacher.');if(!Array.isArray(o.components)||!o.components.length||o.components.length>10||new Set(o.components.map(c=>c.id)).size!==o.components.length||o.components.some(c=>!c.id||!c.label||!Number.isFinite(c.max)||c.max<=0))throw new Error('Invalid assessments.');}
+  if(collection==='offerings'){const previous=(await store.doc(path).get()).data(),o={...previous,...data};await assertRecordSemester(store.database,actor,'subjects',await store.database.collection('subjects').findOne({_id:o.subjectId}));if(isInactive((await store.doc(`users/${o.teacherId}`).get()).data())||!isFaculty((await store.doc(`users/${o.teacherId}`).get()).data())||!(await store.doc(`subjects/${o.subjectId}`).get()).exists)throw new Error('Invalid subject/teacher.');if(!Array.isArray(o.components)||!o.components.length||o.components.length>10||new Set(o.components.map(c=>c.id)).size!==o.components.length||o.components.some(c=>!c.id||!c.label||!Number.isFinite(c.max)||c.max<=0))throw new Error('Invalid assessments.');}
   if(collection==='enrollments'){const s=(await store.doc(`students/${data.studentId}`).get()).data(),o=(await store.doc(`offerings/${data.offeringId}`).get()).data();if(!s||!o||!matchesStudent(s,o)||data.teacherId!==o.teacherId)throw new Error('Invalid enrollment mapping.');}
 }
 export function dataRoutes(store){const router=Router();

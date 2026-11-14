@@ -1,3 +1,4 @@
+import {assertInputSemester,assertRecordSemester} from './semester-context.js';
 import {withUsedSchemes} from './department-schemes.js';
 import {isVisibleScheme} from '../../../js/scheme-visibility.js';
 import {sectionDetailRoutes} from './section-details.js';
@@ -5,7 +6,7 @@ import {retireHodAuthority} from './account-authority.js';
 import {directoryPage} from './directory.js';
 import {eligibleConfigurationAccount,institutionServices} from './configuration-accounts.js';
 import {assertUniqueDepartment,departmentNameKey} from './department-uniqueness.js';
-import {sectionMaster,saveSection} from './section-master.js';
+import {sectionMaster,saveSection,studentSectionCodes} from './section-master.js';
 import {randomUUID} from 'node:crypto';
 import {departmentCode} from '../../../js/department.js';
 import {isInactive} from './account-removal.js';
@@ -21,6 +22,7 @@ export async function departmentOf(db,collection,data,seen=new Set()){
  return null;
 }
 export async function assertDepartment(store,actor,collection,data){
+ await assertRecordSemester(store.database,actor,collection,data);
  if(!actor.managementDepartmentId)return;
  const id=await departmentOf(store.database,collection,data);
  if(id!==actor.managementDepartmentId&&data?.scope!=='institution')fail('This record belongs to another department.','permission-denied');
@@ -28,10 +30,13 @@ export async function assertDepartment(store,actor,collection,data){
 export async function scopedAdminInput(database,actor,input){
  const masters=await database.collection('departments').find({}).toArray();if(!masters.length)return input;
  if(actor.role==='admin'&&input.action==='repairDemoProfile')fail('Only Super Admin can repair institutional identities.','permission-denied');
+ if(input.row&&(input.row.role==='student'||input.row.semester!==undefined))assertInputSemester(actor,input.row);
+ if(input.action==='mapClass')assertInputSemester(actor,input);
  const selected=actor.managementDepartmentId&&masters.find(d=>d._id===actor.managementDepartmentId);
  const prepare=async raw=>{if(!raw)return raw;const row={...raw};if(actor.role==='admin'&&!['student','subject_faculty','mentor'].includes(row.role||'student'))fail('Department Admin cannot provision leadership or shared accounts.','permission-denied');if(row.scope==='institution'&&!departmentalRoles.includes(row.role)&&!row.department&&!row.departmentId)return {...row,department:''};const department=masters.find(d=>d._id===row.departmentId||key(d.code)===key(departmentCode(row.department))||key(d.name)===key(row.department));
  if(selected&&department&&department._id!==selected._id)fail('CSV/account department differs from the selected management department.','permission-denied');
  const chosen=department||(!row.department?selected:null);if(!chosen)fail('Choose a department from the department master.');if(chosen.status!=='active')fail('Department is inactive.');row.department=chosen.code;row.departmentId=chosen._id;return row;};
+ if(input.rows&&!input.previewSemesterRows&&input.action!=='directory')for(const row of input.rows)if(row.role==='student'||row.semester!==undefined)assertInputSemester(actor,row);
  if(input.rows)input={...input,rows:await Promise.all(input.rows.map(prepare))};if(input.row)input={...input,row:await prepare(input.row)};
  if(input.action==='mapClass')input={...input,...await prepare(input)};
  if(input.uid&&actor.role==='admin')await authorizeAccountTarget(database,actor,await database.collection('users').findOne({_id:input.uid}));if(input.uid&&selected){const user=await database.collection('users').findOne({_id:input.uid});if(user?.scope!=='institution'&&(await departmentOf(database,'users',user))!==selected._id)fail('Account belongs to another department.','permission-denied');}
@@ -49,7 +54,7 @@ export async function departmentContext(req,res,next){try{
 }catch(e){next(e);}}
 export async function authorizeAccountTarget(database,actor,target){
  const fresh=await database.collection('users').findOne({_id:actor.uid});if(!fresh||!['admin','super_admin'].includes(fresh.role)||isInactive(fresh))fail('Administrator access required.','permission-denied');
- if(!target)fail('Account not found.');if(target.role==='super_admin'||target._id===actor.uid)fail('Super Admin and your own account are protected.','permission-denied');
+ if(!target)fail('Account not found.');await assertRecordSemester(database,actor,'users',target);if(target.role==='super_admin'||target._id===actor.uid)fail('Super Admin and your own account are protected.','permission-denied');
  const exists=await database.collection('departments').countDocuments();
  if(fresh.role==='admin'&&exists){const own=await departmentOf(database,'users',{...fresh,scope:'department'}),other=await departmentOf(database,'users',target);if(!own||own!==other||target.scope==='institution'||!['student','subject_faculty','mentor'].includes(target.role))fail('Department Admin can manage only students, faculty and mentors in their own department.','permission-denied');}
  if(fresh.role==='super_admin'&&actor.managementDepartmentId&&target.scope!=='institution'&&(await departmentOf(database,'users',target))!==actor.managementDepartmentId)fail('Account belongs to another department.','permission-denied');
@@ -81,7 +86,7 @@ export function departmentRoutes(app,{database,client,createDepartment}){
    req.actor.role==='super_admin'?database.collection('users').find({role:{$in:['admin','hod']}}).toArray():Promise.resolve([]),
    database.collection('users').find({role:{$in:['hod','office','library','accounts','physics_lab','chemistry_lab','sports']},accountStatus:{$nin:['inactive','deleted','deactivating','deleting','exited','exiting']}}).toArray()
   ]);
-  res.json({institutionServices:services,sections:sectionMaster(policy||{}),departments:await withUsedSchemes(database,departments,schemes),schemes:schemes.filter(isVisibleScheme),leadershipAccounts:leadership.map(u=>({uid:u._id,name:u.name,email:u.email,role:u.role,departmentId:u.departmentId,facultyId:u.facultyId,accountStatus:u.accountStatus||'active',eligible:eligibleConfigurationAccount(u)})),workflowAccounts:workflow.filter(u=>eligibleConfigurationAccount(u)&&(req.actor.role==='super_admin'||u.scope==='institution'||u.departmentId===req.actor.managementDepartmentId)).map(u=>({uid:u._id,name:u.name,email:u.email,role:u.role,scope:u.scope,departmentId:u.departmentId}))});
+  res.json({institutionServices:services,sections:sectionMaster(policy||{},req.actor),departments:(await withUsedSchemes(database,departments,schemes)).map(d=>({...d,...(d._id===req.actor.managementDepartmentId?{academicSections:studentSectionCodes(policy||{},d,req.actor.managementSemester)}:{})})),schemes:schemes.filter(isVisibleScheme),leadershipAccounts:leadership.map(u=>({uid:u._id,name:u.name,email:u.email,role:u.role,departmentId:u.departmentId,facultyId:u.facultyId,accountStatus:u.accountStatus||'active',eligible:eligibleConfigurationAccount(u)})),workflowAccounts:workflow.filter(u=>eligibleConfigurationAccount(u)&&(req.actor.role==='super_admin'||u.scope==='institution'||u.departmentId===req.actor.managementDepartmentId)).map(u=>({uid:u._id,name:u.name,email:u.email,role:u.role,scope:u.scope,departmentId:u.departmentId}))});
  });
  app.get('/api/administration/leadership-candidates',async(req,res)=>{
   if(req.actor.role!=='super_admin')fail('Only Super Admin assigns leadership.','permission-denied');

@@ -1,3 +1,4 @@
+import {semesterMatch,assertRecordSemester} from './semester-context.js';
 import {isMentor} from '../../../js/capabilities.js';
 import {authorizeAccountTarget,departmentOf} from './department-master.js';
 import {isManager} from './roles.js';
@@ -40,6 +41,7 @@ export async function accountExit({database,client,auth,actor,input={},restoreSt
    const scoped=await Promise.all(profiles.map(async profile=>({profile,departmentId:await departmentOf(database,'users',profile)})));
    profiles=scoped.filter(({profile,departmentId})=>departmentId===actor.managementDepartmentId||administrator.role==='super_admin'&&profile.scope==='institution').map(({profile})=>profile);
   }
+  const inSemester=[];for(const profile of profiles){try{await assertRecordSemester(database,actor,'users',profile);inSemester.push(profile);}catch{}}profiles=inSemester;
   if(profiles.length>1)fail('Identity is ambiguous; resolve duplicate records before exit management.','failed-precondition');
   const profile=profiles[0];
   // Faculty can retain their employee identity while serving as HOD. Lookup is
@@ -56,8 +58,8 @@ export async function accountExit({database,client,auth,actor,input={},restoreSt
   const status=input.status||'active';if(!['active','inactive','all'].includes(status))fail('Choose Active, Inactive or All.');
   const directoryDepartment=actor.managementDepartmentId||(administrator.role==='super_admin'?input.departmentId:null);
   if(directoryDepartment&&(typeof directoryDepartment!=='string'||!/^[A-Za-z0-9_-]{1,100}$/.test(directoryDepartment)||!await database.collection('departments').findOne({_id:directoryDepartment})))fail('Choose an existing department.');
-  const filter={role:{$in:roles},...(directoryDepartment?{departmentId:directoryDepartment}:{})};if(status!=='all')filter.accountStatus=status==='active'?{$nin:['inactive','deleted','deactivating','deleting','exited','exiting']}:{$in:['inactive','deleted','deactivating','deleting','exited','exiting']};
-  if(input.cursor){if(!/^[A-Za-z0-9_-]{1,128}$/.test(input.cursor))fail('Invalid directory cursor.');filter._id={$gt:input.cursor};}
+  const filter={...(input.kind==='student'?await semesterMatch(database,actor,'students'):{}),role:{$in:roles},...(directoryDepartment?{departmentId:directoryDepartment}:{})};if(status!=='all')filter.accountStatus=status==='active'?{$nin:['inactive','deleted','deactivating','deleting','exited','exiting']}:{$in:['inactive','deleted','deactivating','deleting','exited','exiting']};
+  if(input.cursor){if(!/^[A-Za-z0-9_-]{1,128}$/.test(input.cursor))fail('Invalid directory cursor.');filter._id={...filter._id,$gt:input.cursor};}
   const maximum=action==='export'?10001:51,profiles=await database.collection('users').find(filter).sort({_id:1}).limit(maximum).toArray();
   if(action==='export'&&profiles.length>10000)fail('Export exceeds 10,000 accounts; use a smaller directory scope.');
   const more=action==='directory'&&profiles.length>50,selected=more?profiles.slice(0,50):profiles,rows=[];

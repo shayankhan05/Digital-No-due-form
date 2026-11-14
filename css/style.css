@@ -1950,3 +1950,29 @@ dialog.delete-review-cascade { width: min(94vw, 640px); }
 }
 :is(#facultyTeachingAssignments,#subjectTeachingAssignments) [data-filters] > * { min-width: 0; }
 #facultyTeachingAssignments [data-results] article li { margin-block: .4rem; }
+
+/* Persistent academic context; shared faculty accounts are not cohort-scoped. */
+#departmentContext.management-context { display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; width:calc(100% - 32px); max-width:1452px; margin:12px auto; }
+.management-context > label { flex:1 1 240px; min-width:0; }
+.management-context label > span { display:block; padding:10px 0; }
+.management-context > p { flex:1 0 100%; margin:0; }
+#importTarget { font-weight:600; }
+#importPreview .student-preview-table { table-layout:fixed; min-width:1500px; width:100%; }
+#importPreview .student-preview-table :is(th,td) { vertical-align:top; white-space:normal; word-break:normal; overflow-wrap:break-word; }
+.student-preview-table th:nth-child(1) { width:3rem; }
+.student-preview-table :is(th,td):nth-child(2) { width:150px; }
+.student-preview-table :is(th,td):nth-child(3),
+.student-preview-table :is(th,td):nth-child(4) { width:130px; }
+.student-preview-table :is(th,td):nth-child(5) { width:200px; }
+.student-preview-table :is(th,td):nth-child(6) { width:90px; }
+.student-preview-table :is(th,td):nth-child(7),
+.student-preview-table :is(th,td):nth-child(8) { width:75px; }
+.student-preview-table :is(th,td):nth-child(9) { width:150px; }
+#importPreview .student-preview-table :is(th,td):nth-child(10) { width:120px; white-space:nowrap; }
+
+#importPreview .student-preview-table th { white-space:nowrap; }
+.student-preview-table :is(th,td):nth-child(6) { width:120px; }
+.student-preview-table :is(th,td):nth-child(7) { width:100px; }
+@media (min-width:801px) {
+ #departmentContext.management-context { position:sticky; top:0; z-index:15; }
+}

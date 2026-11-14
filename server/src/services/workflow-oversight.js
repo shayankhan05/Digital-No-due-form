@@ -1,3 +1,4 @@
+import {semesterMatch,assertRecordSemester} from './semester-context.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {resetNoDueRequest,resettableStatuses} from './request-reset.js';
 import {departmentOf} from './department-master.js';
@@ -58,9 +59,10 @@ export async function overrideDecision(store,actor,id,input){
 export function oversightRoutes(app,{store,database,backupKey}){
  const superOnly=actor=>{if(actor.role!=='super_admin')fail('Super Admin access required.','permission-denied');};
  app.get('/api/oversight/requests',async(req,res)=>{
-  superOnly(req.actor);const departmentId=req.actor.managementDepartmentId||req.query.departmentId;
+  if(!['admin','super_admin'].includes(req.actor.role))fail('Administrator access required.','permission-denied');const departmentId=req.actor.managementDepartmentId||req.query.departmentId;
   if(typeof departmentId!=='string'||!/^[A-Za-z0-9_-]{1,100}$/.test(departmentId))fail('Select a department.');const department=await database.collection('departments').findOne({_id:departmentId});if(!department)fail('Select a department.');
-  const q={},term=String(req.query.term||'').trim();if(term.length>150)fail('Search is too long.');
+  if(req.actor.managementDepartmentId&&departmentId!==req.actor.managementDepartmentId)fail('Wrong department context.','permission-denied');
+  const q={...await semesterMatch(database,req.actor,'noDueRequests')},term=String(req.query.term||'').trim();if(term.length>150)fail('Search is too long.');
   // Resolve department from the student as well as historical request references.
   const students=await database.collection('students').find({departmentId},{projection:{_id:1,auid:1}}).toArray();
   q.$or=[{departmentId},{departmentId:{$in:[null,'']},department:{$in:[department.code,department.name]}},{departmentId:{$in:[null,'']},department:{$in:[null,'']},studentId:{$in:students.map(s=>s._id)}}];
@@ -73,10 +75,10 @@ export function oversightRoutes(app,{store,database,backupKey}){
   res.json({rows:rows.map(r=>({id:r._id,studentName:r.studentName,usn:r.usn,auid:r.auid||auids.get(r.studentId),status:r.status,createdAt:r.createdAt,version:r.version||0})),total,page,pages:Math.ceil(total/20)});
  });
  app.get('/api/oversight/requests/:id',async(req,res)=>{
-  superOnly(req.actor);const raw=await database.collection('noDueRequests').findOne({_id:req.params.id});if(!raw)fail('Request not found.');
+  if(!['admin','super_admin'].includes(req.actor.role))fail('Administrator access required.','permission-denied');const raw=await database.collection('noDueRequests').findOne({_id:req.params.id});if(!raw)fail('Request not found.');
   if(req.actor.managementDepartmentId&&await departmentOf(database,'noDueRequests',raw)!==req.actor.managementDepartmentId)fail('Wrong department.','permission-denied');
   const overrides=await database.collection('workflowOverrides').find({requestId:raw._id}).sort({at:1,_id:1}).toArray();
-  const latest=await database.collection('noDueRequests').findOne({studentId:raw.studentId},{sort:{createdAt:-1,_id:-1}}),timeline=await workflowTimeline(store,raw);if(latest?._id!==raw._id)for(const row of timeline)row.canOverride=false;res.json({id:raw._id,studentName:raw.studentName,usn:raw.usn,auid:raw.auid||(await store.doc('students/'+raw.studentId).get()).data()?.auid,status:raw.status,createdAt:raw.createdAt,version:raw.version||0,canReset:latest?._id===raw._id&&resettableStatuses.includes(raw.status),resetReason:raw.resetReason,resetAt:raw.resetAt,timeline,overrides});
+  const latest=await database.collection('noDueRequests').findOne({studentId:raw.studentId},{sort:{createdAt:-1,_id:-1}}),timeline=await workflowTimeline(store,raw);if(req.actor.role!=='super_admin'||latest?._id!==raw._id)for(const row of timeline)row.canOverride=false;res.json({id:raw._id,studentName:raw.studentName,usn:raw.usn,auid:raw.auid||(await store.doc('students/'+raw.studentId).get()).data()?.auid,status:raw.status,createdAt:raw.createdAt,version:raw.version||0,canReset:req.actor.role==='super_admin'&&latest?._id===raw._id&&resettableStatuses.includes(raw.status),resetReason:raw.resetReason,resetAt:raw.resetAt,timeline,overrides});
  });
  app.post('/api/oversight/requests/:id/reset',async(req,res)=>res.json(await resetNoDueRequest({store,actor:req.actor,id:req.params.id,input:req.body,backupKey})));
  app.post('/api/oversight/requests/:id/override',async(req,res)=>res.json(await overrideDecision(store,req.actor,req.params.id,req.body)));

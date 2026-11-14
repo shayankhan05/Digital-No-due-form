@@ -5,6 +5,7 @@ export function allowedCollegeDomains(values,existing={},demo=false){
  return domains;
 }
 import {phoneError} from '../../../js/phone.js';
+import {newSubjectId,subjectsInSemester} from './subject-semester.js';
 import {assertSemester} from '../../../js/semester.js';
 import {isMentor,isFaculty,hasRole} from '../../../js/capabilities.js';
 import {sectionMaster,studentSectionCodes} from './section-master.js';
@@ -83,7 +84,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
       if(row.auid&&!/^[A-Z0-9]{1,40}$/.test(row.auid))fail('AUID must contain letters and numbers only (maximum 40 characters).');
       row.usn=text(row.usn).toUpperCase();row.semester=assertSemester(row.semester);row.section=text(row.section).toUpperCase();
       if(!/^[A-Z0-9-]{4,30}$/.test(row.usn)) fail('A valid USN is required.');
-      if(!studentSectionCodes(p,p.departmentRecords.find(d=>d.code===row.department)).includes(row.section)) fail('Choose a configured section.');
+      if(!studentSectionCodes(p,p.departmentRecords.find(d=>d.code===row.department),row.semester).includes(row.section)) fail('Choose a configured section.');
       if(!row.scheme) fail('Scheme is required.');if(p.schemeRecords.length&&!p.schemeRecords.some(s=>s.code===row.scheme&&s.status==='active'&&(s.scope==='institution'||s.departmentIds?.includes(p.departmentRecords.find(d=>d.code===row.department)?.id))&&(!p.departmentRecords.find(d=>d.code===row.department)?.schemeIds?.length||p.departmentRecords.find(d=>d.code===row.department).schemeIds.includes(s.id))))fail('Choose an active scheme applicable to this department.');
     } else if(!row.facultyId || !/^[A-Z0-9_-]{1,80}$/.test(row.facultyId)) fail('Faculty/employee ID must contain letters, numbers, hyphens or underscores.');
     const master=p.departmentRecords.find(d=>d.code===row.department);
@@ -673,7 +674,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   async function validateOffering(input) {
     const p=await policy(),row={...input};
     row.department=canonicalDepartment(row.department,p.departmentAliases);row.scheme=text(row.scheme);row.semester=assertSemester(row.semester);row.section=text(row.section).toUpperCase();row.subjectCode=text(row.subjectCode);row.subjectName=text(row.subjectName);row.teacherEmail=email(row.teacherEmail);
-    if(!p.departments.includes(row.department) || !p.sections.includes(row.section) || !row.scheme) fail('Valid department, scheme, semester and section are required.');
+    if(!p.departments.includes(row.department) || !studentSectionCodes(p,p.departmentRecords.find(d=>d.code===row.department),row.semester).includes(row.section) || !row.scheme) fail('Valid department, scheme, semester and section are required.');
     if(p.schemeRecords.length&&!p.schemeRecords.some(s=>s.code===row.scheme&&s.status==='active'&&(s.scope==='institution'||s.departmentIds?.includes(p.departmentRecords.find(d=>d.code===row.department)?.id))&&(!p.departmentRecords.find(d=>d.code===row.department)?.schemeIds?.length||p.departmentRecords.find(d=>d.code===row.department).schemeIds.includes(s.id))))fail('Choose an active scheme applicable to this department.');
     if(!row.subjectCode || !row.subjectName || row.subjectCode.length>40 || row.subjectName.length>200) fail('Confirmed subject code and name are required; do not guess source fields.');
     const teacher=await resolve('email',row.teacherEmail,['subject_faculty','mentor']);
@@ -683,7 +684,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     row.active=row.active!==false && text(row.active).toLowerCase()!=='false';
     row.credits=text(row.credits)===''?null:Number(row.credits);
     if(row.credits!==null && (!Number.isFinite(row.credits) || row.credits<0 || row.credits>30)) fail('Credits must be numeric when supplied.');
-    const academicMaster=p.departmentRecords.find(d=>d.code===row.department);let subjectQuery=db.collection('subjects');if(academicMaster?.creationDigest)subjectQuery=subjectQuery.where('departmentId','==',academicMaster.id);const subjectRows=await subjectQuery.where('department','==',row.department).where('scheme','==',row.scheme).where('code','==',row.subjectCode).limit(2).get();if(subjectRows.size>1)fail('Ambiguous subject master. Resolve duplicate subject codes before import.');if(subjectRows.size&&subjectRows.docs[0].data().active===false)fail('This subject master is inactive. Choose an active subject.');if(subjectRows.size&&subjectRows.docs[0].data().name!==row.subjectName)fail('Subject name differs from the existing master.');row.subjectId=subjectRows.docs[0]?.id||`subject_${hash([row.department,row.scheme,row.subjectCode].join('|')).slice(0,32)}`;
+    const academicMaster=p.departmentRecords.find(d=>d.code===row.department);let subjectQuery=db.collection('subjects');if(academicMaster?.creationDigest)subjectQuery=subjectQuery.where('departmentId','==',academicMaster.id);const subjectCandidates=await subjectQuery.where('department','==',row.department).where('scheme','==',row.scheme).where('code','==',row.subjectCode).get();const matchedSubjects=await subjectsInSemester(db,subjectCandidates.docs,row.semester),subjectRows={docs:matchedSubjects,size:matchedSubjects.length};if(subjectRows.size>1)fail('Ambiguous subject master. Resolve duplicate subject codes before import.');if(subjectRows.size&&subjectRows.docs[0].data().active===false)fail('This subject master is inactive. Choose an active subject.');if(subjectRows.size&&subjectRows.docs[0].data().name!==row.subjectName)fail('Subject name differs from the existing master.');row.subjectId=subjectRows.docs[0]?.id||newSubjectId(row);
     row.departmentId=p.departmentRecords.find(d=>d.code===row.department)?.id;
     row.id=`class_${hash([row.department,row.scheme,row.semester,row.section,row.subjectCode].join('|')).slice(0,32)}`;
     const previous=(await db.doc(`offerings/${row.id}`).get()).data();
@@ -703,7 +704,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     const row=await validateOffering(input),batch=db.batch([`users/${row.teacherId}`]);
     const subjectRef=db.doc(`subjects/${row.subjectId}`),offeringRef=db.doc(`offerings/${row.id}`);
     const [subject,offering]=await Promise.all([subjectRef.get(),offeringRef.get()]);
-    const subjectFields={...(row.departmentId?{departmentId:row.departmentId}:{}),name:row.subjectName,code:row.subjectCode,department:row.department,scheme:row.scheme,credits:row.credits};
+    const subjectFields={...(row.departmentId?{departmentId:row.departmentId}:{}),name:row.subjectName,code:row.subjectCode,department:row.department,scheme:row.scheme,credits:row.credits,...(!subject.exists?{semester:row.semester}:{})};
     const offeringFields={...(row.departmentId?{departmentId:row.departmentId}:{}),subjectId:row.subjectId,subjectName:row.subjectName,subjectCode:row.subjectCode,department:row.department,scheme:row.scheme,semester:row.semester,section:row.section,teacherId:row.teacherId,active:row.active,credits:row.credits,components:row.components,componentIds:row.components.map(c=>c.id)};
     const unchanged=(snapshot,fields)=>snapshot.exists && Object.entries(fields).every(([key,value])=>JSON.stringify(snapshot.data()[key])===JSON.stringify(value));
     if(!unchanged(subject,subjectFields))batch.set(subjectRef,{...subjectFields,updatedAt:stamp()},{merge:true});
@@ -723,7 +724,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
   async function mapClass({department,scheme,semester,section,cursor}) {
     assertSemester(semester);
     const p=await policy(),d=canonicalDepartment(department,p.departmentAliases),s=text(section).toUpperCase();
-    if(!p.departments.includes(d) || !p.sections.includes(s) || !Number.isInteger(Number(semester)) || !text(scheme)) fail('Valid class filters required.');
+    if(!p.departments.includes(d) || !studentSectionCodes(p,p.departmentRecords.find(record=>record.code===d),semester).includes(s) || !Number.isInteger(Number(semester)) || !text(scheme)) fail('Valid class filters required.');
     // Coarse indexed cohort query, then normalize historical class field types.
     // Page by scanned documents even when a page contains no matching students.
     const master=p.departmentRecords.find(record=>record.code===d);let q=db.collection('students').where('semester','in',[Number(semester),String(Number(semester))]);if(master?.creationDigest)q=q.where('departmentId','==',master.id);q=q.orderBy('__name__').limit(20);
