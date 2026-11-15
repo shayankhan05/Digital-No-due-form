@@ -4,8 +4,8 @@ const endpoint='/api/administration/test-data-cleanup';
 const phrase='PURGE TEST DATA';
 export function mountTestDataCleanup(host,actor){
  if(!host||actor.role!=='super_admin')return;
- const panel=document.createElement('section');panel.className='card';
- panel.innerHTML='<h2>Test Data Cleanup</h2><p>Scan reviewed test records before purging. Current students, institutional data and shared history are protected.</p><button type="button" class="btn-sm" data-scan>Scan Test Data</button><div data-review></div><p data-status role="status" aria-live="polite"></p>';
+ const panel=document.createElement('details');panel.className='card';panel.id='advancedMaintenance';
+ panel.innerHTML='<summary>Advanced Maintenance</summary><h3>Test / Demo Data Maintenance</h3><p>Scan for reviewed test/demo records. Scanning does not delete or modify data.</p><button type="button" class="btn-sm" data-scan>Scan Test Data</button><div data-review></div><p data-status role="status" aria-live="polite"></p>';
  host.append(panel);
  const scan=panel.querySelector('[data-scan]'),review=panel.querySelector('[data-review]'),status=panel.querySelector('[data-status]');
  function report(result){
@@ -21,8 +21,10 @@ export function mountTestDataCleanup(host,actor){
     p.blocked.map(b=>'<p>'+e(b.collection)+': '+b.count+' · '+e(b.reason)+'</p>').join('')+
     (p.authBlocked?'<p>'+e(p.authBlocked)+'</p>':'')+(!p.backupReady?'<p>Encrypted backup configuration is required before purging.</p>':'');
    if(p.pendingJob){
-    const b=document.createElement('button');b.type='button';b.className='btn-sm';b.textContent='Resume Firebase verification';review.append(b);
-    b.onclick=()=>busy(b,async()=>{try{report(await post(endpoint+'/resume',{id:p.pendingJob}));}catch(err){status.textContent=err.message;}});return;
+    const b=document.createElement('button');b.type='button';b.className='btn-sm';b.textContent='Resume reviewed cleanup';b.disabled=true;
+    review.insertAdjacentHTML('beforeend','<p>Resuming may finish permanent deletion of the previously reviewed test accounts.</p><label>Type PURGE TEST DATA<input data-resume-confirm autocomplete="off"></label>');review.append(b);
+    const input=review.querySelector('[data-resume-confirm]');input.oninput=()=>b.disabled=input.value!==phrase;
+    b.onclick=()=>busy(b,async()=>{if(input.value!==phrase)return;try{report(await post(endpoint+'/resume',{id:p.pendingJob,confirmation:phrase}));}catch(err){status.textContent=err.message;}});return;
    }
    if(!p.total||p.blocked.length||p.authBlocked||!p.backupReady)return;
    review.insertAdjacentHTML('beforeend','<p>This permanently removes only the reviewed records. An encrypted backup is created before deletion.</p><label>Type PURGE TEST DATA<input data-confirm autocomplete="off"></label><button type="button" class="btn-primary" data-purge disabled>Purge Test Data</button>');

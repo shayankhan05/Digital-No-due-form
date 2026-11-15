@@ -103,6 +103,10 @@ export function departmentRoutes(app,{database,client,createDepartment}){
  });
  app.post('/api/administration/department-retry',async(req,res)=>{if(req.actor.role!=='super_admin')fail('Only Super Admin manages department setup.','permission-denied');fail('Automatic initial Admin provisioning is disabled. Open Department Setup and assign leadership explicitly.','failed-precondition');});
  app.post('/api/administration/master',async(req,res)=>{
+ if(req.actor.role==='admin'&&req.body.kind==='sections'){
+  if(!req.actor.managementDepartmentId||!req.actor.managementSemester||req.body.catalogOnly)fail('Department Admin can manage only sections in the selected department and semester.','permission-denied');
+  return res.json(await saveSection(database,client,req.actor,req.body));
+ }
  if(req.actor.role!=='super_admin')fail('Only Super Admin manages departments and schemes.','permission-denied');
  const {kind,id,...input}=req.body;if(kind==='sections')return res.json(await saveSection(database,client,req.actor,req.body));if(kind==='departments'&&!id)return res.json(await createDepartment(req.actor,req.body));if(!['departments','schemes'].includes(kind))fail('Choose department or scheme.');
  const code=String(input.code||'').trim().toUpperCase(),name=String(input.name||'').trim();if(!/^[A-Z0-9_-]{1,30}$/.test(code)||!name||name.length>150)fail('A valid code and name are required.');if(!['active','inactive'].includes(input.status))fail('Choose active or inactive.');

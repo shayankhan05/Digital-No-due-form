@@ -247,6 +247,7 @@ export function testDataCleanupRoutes(app,{database,client,auth,backupKey=proces
  });
  app.post(base+'/resume',async(req,res)=>{
   await ensureAdmin(req.actor);
+  if(req.body?.confirmation!=='PURGE TEST DATA')fail('Explicit cleanup confirmation is required before resuming.');
   if(typeof req.body?.id!=='string'||!/^[a-f0-9]{64}$/.test(req.body.id))fail('Invalid purge job.');
   res.json(await finish(req.actor,req.body.id));
  });

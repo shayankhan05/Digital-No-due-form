@@ -2,7 +2,7 @@ const mainSections=[['overview','Overview'],['departments','Departments'],['crea
 const aliases={accounts:'faculty-staff',superOverview:'overview',departmentMaster:'departments',collegeAccounts:'faculty-staff',academicSetup:'academic-setup',departmentWorkflow:'workflow-setup',institutionSettings:'institution-settings'};
 export function workspaceSection(hash){const key=String(hash||'').replace(/^#/,'');return mainSections.some(([id])=>id===key)?key:aliases[key]||'overview';}
 export function mountSuperWorkspace(content,actor={role:'super_admin'}){
- const sections=actor.role==='super_admin'?mainSections:mainSections.filter(([id])=>['faculty-staff','students','subjects-teaching','workflow-setup'].includes(id));
+ const sections=actor.role==='super_admin'?mainSections:mainSections.filter(([id])=>['faculty-staff','students','subjects-teaching','academic-setup','workflow-setup'].includes(id));
  let root=document.getElementById('superManagement');if(!root){root=document.createElement('div');root.id='superManagement';content.prepend(root);}
  const panels=new Map(sections.map(([id,title])=>{const section=document.createElement('section');section.id='super-panel-'+id;section.dataset.superSection=id;section.setAttribute('aria-label',title);section.hidden=true;return[id,section];}));
  const imports=document.getElementById('collegeImport'),manual=document.getElementById('manualAccountCard'),directory=document.getElementById('accountDirectoryHost');

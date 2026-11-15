@@ -137,6 +137,50 @@ test('subject codes can overlap across semesters without renaming legacy Semeste
 });
 
 
+
+test('section saves omit capacity, retain legacy capacity and keep class teachers optional within the department',async()=>{
+ const people=[
+  {_id:'section-peer',name:'Active department colleague',facultyId:'ISE-PEER',role:'subject_faculty',department:'ISE',departmentId:'dept_ISE'},
+  {_id:'section-inactive',name:'Inactive colleague',facultyId:'ISE-INACTIVE',role:'subject_faculty',department:'ISE',departmentId:'dept_ISE',accountStatus:'inactive'},
+  {_id:'section-disabled',name:'Disabled colleague',facultyId:'ISE-DISABLED',role:'subject_faculty',department:'ISE',departmentId:'dept_ISE',authDisabled:true},
+  {_id:'section-hidden',name:'Unavailable colleague',facultyId:'ISE-HIDDEN',role:'subject_faculty',department:'ISE',departmentId:'dept_ISE',configurationSelectable:false},
+  {_id:'section-foreign',name:'Foreign colleague',facultyId:'CSE-PEER',role:'subject_faculty',department:'CSE',departmentId:'dept_CSE'},
+ ];
+ for(const person of people){const {_id,...data}=person;await store.doc('users/'+_id).set({...data,email:_id+'@college.test'});}
+ const protectedNames=['students','subjects','offerings','enrollments','marks','noDueRequests','approvals'],before={};for(const name of protectedNames)before[name]=await database.collection(name).find({}).sort({_id:1}).toArray();
+ const facultyCount=await database.collection('users').countDocuments();
+ for(const [actor,code]of [['super','SCT'],['department-admin','DCT']]){
+  const added=await call(actor,5,'/api/administration/master',{kind:'sections',code,status:'active'});assert.equal(added.status,200,JSON.stringify(added.body));
+  const save=body=>call(actor,5,'/api/administration/section-details',{section:code,label:code,...body});
+  assert.equal((await save({room:'No teacher required'})).status,200);
+  const fresh=await database.collection('sectionDetails').findOne({departmentId:'dept_ISE',semester:5,section:code});assert.equal(fresh.classTeacherId,null);assert.ok(!Object.hasOwn(fresh,'maximumCapacity'));
+  await database.collection('sectionDetails').updateOne({_id:fresh._id},{$set:{maximumCapacity:73}});
+  assert.equal((await save({room:'Changed room',maximumCapacity:-100})).status,200);
+  const preserved=await database.collection('sectionDetails').findOne({_id:fresh._id});assert.equal(preserved.maximumCapacity,73);assert.equal(preserved.classTeacherId,null);
+  const faculty=await get(actor,3,'/api/administration/section-faculty');assert.equal(faculty.status,200);assert.ok(faculty.body.rows.some(r=>r._id==='teacher'));assert.ok(faculty.body.rows.some(r=>r._id==='section-peer'));assert.ok(!faculty.body.rows.some(r=>['section-inactive','section-disabled','section-hidden','section-foreign'].includes(r._id)));
+  for(const invalid of ['section-inactive','section-disabled','section-hidden','section-foreign'])assert.equal((await save({classTeacherId:invalid})).status,400);
+  assert.equal((await save({classTeacherId:'section-peer'})).status,200);
+  const rows=await get(actor,5,'/api/administration/sections'),row=rows.body.rows.find(r=>r.code===code);assert.equal(row.classTeacherId,'section-peer');assert.equal(row.classTeacher._id,'section-peer');assert.equal(row.classTeacher.active,true);assert.equal(row.classTeacher.name,'Active department colleague');
+  assert.equal((await save({room:'Partial edit keeps teacher'})).status,200);assert.equal((await database.collection('sectionDetails').findOne({_id:fresh._id})).classTeacherId,'section-peer');
+  assert.equal((await save({classTeacherId:''})).status,200);assert.equal((await database.collection('sectionDetails').findOne({_id:fresh._id})).classTeacherId,null);assert.equal((await database.collection('sectionDetails').findOne({_id:fresh._id})).maximumCapacity,73);
+ }
+ assert.equal((await call('department-admin',5,'/api/administration/master',{kind:'sections',code:'GLOBAL',status:'active',catalogOnly:true})).status,403);
+ assert.equal((await call('department-admin',5,'/api/administration/master',{kind:'schemes',code:'NEW',name:'Forbidden',status:'active'})).status,403);
+ for(const [name,rows]of Object.entries(before))assert.deepEqual(await database.collection(name).find({}).sort({_id:1}).toArray(),rows,name+' unchanged');
+ assert.equal(await database.collection('users').countDocuments(),facultyCount);assert.equal(authMutations,0);
+});
+test('test-data scan is read-only and cleanup/resume require explicit confirmation',async()=>{
+ const names=(await database.listCollections().toArray()).map(c=>c.name).filter(n=>!n.startsWith('system.')),before={};
+ for(const name of names)before[name]=await database.collection(name).find({}).sort({_id:1}).toArray();
+ const scan=await get('super',5,'/api/administration/test-data-cleanup');assert.equal(scan.status,200,JSON.stringify(scan.body));
+ assert.equal((await get('department-admin',5,'/api/administration/test-data-cleanup')).status,403);
+ assert.equal((await call('super',5,'/api/administration/test-data-cleanup/purge',{fingerprint:'a'.repeat(64)})).status,400);
+ assert.equal((await call('super',5,'/api/administration/test-data-cleanup/resume',{id:'b'.repeat(64)})).status,400);
+ for(const [name,rows]of Object.entries(before))assert.deepEqual(await database.collection(name).find({}).sort({_id:1}).toArray(),rows,name+' unchanged by scan');
+ assert.equal(authMutations,0);
+});
+
+
 test('Chrome admin semester selector persists, refreshes cohorts and shows a complete safe CSV preview',async()=>{
  const {chromium}=await import('playwright'),{default:express}=await import('express'),{fileURLToPath}=await import('node:url');
  const backend=app.listen(0,'127.0.0.1');await new Promise(resolve=>backend.once('listening',resolve));
@@ -192,6 +236,38 @@ test('Chrome admin semester selector persists, refreshes cohorts and shows a com
    const columns=await page.locator('#importPreview th').allTextContents();assert.deepEqual(columns,['#','Name','USN','AUID','Email','Department','Semester','Section','Mentor','Status','Validation details']);
    await page.setViewportSize({width:390,height:844});const layout=await page.locator('#importPreview .table-scroll').evaluate(el=>({scrolls:el.scrollWidth>el.clientWidth,status:getComputedStyle(el.querySelector('td:nth-child(10)')).whiteSpace,details:getComputedStyle(el.querySelector('td:nth-child(11)')).whiteSpace}));assert.deepEqual(layout,{scrolls:true,status:'nowrap',details:'normal'});
    await page.setViewportSize({width:1366,height:900});await page.screenshot({path:fileURLToPath(new URL('../migration-output/semester-context-'+actor+'.png',import.meta.url)),fullPage:true});
+
+   const protectedNames=['students','subjects','offerings','enrollments','marks','noDueRequests','approvals'],preserved={};for(const name of protectedNames)preserved[name]=await database.collection(name).find({}).sort({_id:1}).toArray();
+   await database.collection('sectionDetails').updateOne({departmentId:'dept_ISE',semester:3,section:'A'},{$set:{classTeacherId:'teacher',maximumCapacity:85}});
+   await page.locator('.super-tabs a[href="#academic-setup"]').click();await page.locator('#sectionList th').filter({hasText:'Class Teacher'}).waitFor();
+   await page.locator('#showSectionEditor').click();assert.equal(await page.locator('#sectionForm [name=maximumCapacity]').count(),0);
+   const code=actor==='super'?'SUI':'DUI';await page.locator('#sectionForm [name=code]').fill(code);await page.locator('#sectionForm .btn-primary').click();
+   const added=page.locator('#sectionList tbody tr').filter({has:page.getByRole('cell',{name:code,exact:true})});await added.waitFor();assert.equal(await added.locator('td').nth(1).innerText(),'Not assigned');
+   await added.getByRole('button',{name:'Edit',exact:true}).click();await page.locator('#sectionForm [name=classTeacherId] option[value="section-peer"]').waitFor({state:'attached'});
+   assert.equal(await page.locator('#sectionForm [name=maximumCapacity]').count(),0);assert.equal(await page.locator('#sectionForm [name=classTeacherId]').inputValue(),'');assert.equal(await page.locator('#sectionForm [name=classTeacherId]').evaluate(el=>el.required),false);
+   const facultyOptions=await page.locator('#sectionForm [name=classTeacherId] option').evaluateAll(rows=>rows.map(r=>r.value));assert.ok(!facultyOptions.some(id=>['section-inactive','section-disabled','section-hidden','section-foreign'].includes(id)));
+   await page.locator('#sectionForm [name=room]').fill('Optional teacher room');await page.locator('#sectionForm .btn-primary').click();await page.locator('#sectionEditor').waitFor({state:'hidden'});assert.equal((await database.collection('sectionDetails').findOne({departmentId:'dept_ISE',semester:3,section:code})).classTeacherId,null);
+   const existing=page.locator('#sectionList tbody tr').filter({has:page.locator('[data-edit=section_A]')});assert.equal(await existing.locator('td').nth(1).innerText(),'teacher');
+   await existing.getByRole('button',{name:'Edit',exact:true}).click();await page.locator('#sectionForm [name=classTeacherId] option[value="section-peer"]').waitFor({state:'attached'});assert.equal(await page.locator('#sectionForm [name=classTeacherId]').inputValue(),'teacher');
+   await page.locator('#sectionForm [name=classTeacherId]').selectOption('section-peer');await page.locator('#sectionForm .btn-primary').click();await page.locator('#sectionEditor').waitFor({state:'hidden'});await existing.getByText('Active department colleague',{exact:true}).waitFor();
+   assert.equal((await database.collection('sectionDetails').findOne({departmentId:'dept_ISE',semester:3,section:'A'})).maximumCapacity,85);
+   await existing.getByRole('button',{name:'Edit',exact:true}).click();await page.locator('#sectionForm [name=classTeacherId] option[value="section-peer"]').waitFor({state:'attached'});assert.equal(await page.locator('#sectionForm [name=classTeacherId]').inputValue(),'section-peer');
+   await page.locator('#sectionForm [name=classTeacherId]').selectOption('');await page.locator('#sectionForm .btn-primary').click();await page.locator('#sectionEditor').waitFor({state:'hidden'});await existing.getByRole('cell',{name:'Not assigned',exact:true}).waitFor();
+   if(actor==='super'){
+    let scans=0,cleanupPosts=0;page.on('request',r=>{if(r.url().includes('/api/administration/test-data-cleanup')){if(r.method()==='GET')scans++;if(r.method()==='POST')cleanupPosts++;}});
+    await page.locator('.super-tabs a[href="#institution-settings"]').click();const maintenance=page.locator('#advancedMaintenance');await maintenance.waitFor();assert.equal(await maintenance.evaluate(el=>el.open),false);assert.equal(scans,0);assert.equal(await maintenance.getByRole('button',{name:'Scan Test Data',exact:true}).isVisible(),false);
+    await maintenance.locator('summary').click();assert.equal(scans,0);assert.match(await maintenance.innerText(),/Scanning does not delete or modify data/);
+    const beforeScan={};for(const name of (await database.listCollections().toArray()).map(c=>c.name).filter(n=>!n.startsWith('system.')))beforeScan[name]=await database.collection(name).find({}).sort({_id:1}).toArray();
+    await maintenance.getByRole('button',{name:'Scan Test Data',exact:true}).click();await maintenance.getByText('Scan complete. Nothing was deleted.',{exact:true}).waitFor();assert.equal(scans,1);
+    for(const [name,rows]of Object.entries(beforeScan))assert.deepEqual(await database.collection(name).find({}).sort({_id:1}).toArray(),rows,name+' untouched by browser scan');
+    const scanResult={counts:{users:1},detach:{},retainedHistory:{},firebaseAccounts:1,integrityIssues:0,unclassifiedLegacy:{},blocked:[],authBlocked:'',backupReady:true,total:1,fingerprint:'a'.repeat(64),pendingJob:null};
+    await page.route('**/api/administration/test-data-cleanup',route=>route.fulfill({status:200,json:scanResult}));
+    await maintenance.getByRole('button',{name:'Scan Test Data',exact:true}).click();await maintenance.locator('[data-purge]').waitFor();assert.equal(await maintenance.locator('[data-purge]').isDisabled(),true);await maintenance.locator('[data-confirm]').fill('wrong');assert.equal(await maintenance.locator('[data-purge]').isDisabled(),true);await maintenance.locator('[data-confirm]').fill('PURGE TEST DATA');assert.equal(await maintenance.locator('[data-purge]').isEnabled(),true);
+    scanResult.pendingJob='b'.repeat(64);await maintenance.getByRole('button',{name:'Scan Test Data',exact:true}).click();const resume=maintenance.getByRole('button',{name:'Resume reviewed cleanup',exact:true});await resume.waitFor();assert.equal(await resume.isDisabled(),true);await maintenance.locator('[data-resume-confirm]').fill('PURGE TEST DATA');assert.equal(await resume.isEnabled(),true);assert.equal(cleanupPosts,0);
+   }else assert.equal(await page.locator('#advancedMaintenance').count(),0);
+   for(const [name,rows]of Object.entries(preserved))assert.deepEqual(await database.collection(name).find({}).sort({_id:1}).toArray(),rows,name+' preserved across section edits');
+
+
    assert.deepEqual(errors,[]);await context.close();
   }
  }finally{await browser.close();await new Promise(resolve=>backend.close(resolve));await new Promise(resolve=>frontend.close(resolve));}
