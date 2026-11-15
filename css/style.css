@@ -1973,6 +1973,3 @@ dialog.delete-review-cascade { width: min(94vw, 640px); }
 #importPreview .student-preview-table th { white-space:nowrap; }
 .student-preview-table :is(th,td):nth-child(6) { width:120px; }
 .student-preview-table :is(th,td):nth-child(7) { width:100px; }
-@media (min-width:801px) {
- #departmentContext.management-context { position:sticky; top:0; z-index:15; }
-}

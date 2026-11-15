@@ -154,9 +154,35 @@ test('Chrome admin semester selector persists, refreshes cohorts and shows a com
    await page.goto(url);await page.locator('#managementSemester').waitFor();
    if(actor==='super'){await page.locator('#managementDepartment').selectOption('dept_ISE');await page.waitForLoadState('load');}
    await page.locator('#importFile').waitFor();assert.equal(await page.locator('#managementSemester').inputValue(),'5');
+   for(const width of [1366,768,390]){
+    await page.setViewportSize({width,height:900});
+    const position=await page.locator('#departmentContext').evaluate(el=>getComputedStyle(el).position);assert.equal(position,'static',actor+' normal positioning at '+width);
+    const scroll=page.locator('.department-scroll');
+    await scroll.evaluate(async el=>{el.scrollTop=0;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
+    const initial=await page.locator('#departmentContext').boundingBox();
+    await scroll.evaluate(async el=>{el.scrollTop=400;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
+    const moved=await page.locator('#departmentContext').boundingBox(),delta=await scroll.evaluate(el=>el.scrollTop),viewport=await scroll.boundingBox();
+    assert.ok(delta>=300,actor+' page can scroll at '+width);
+    assert.ok(Math.abs(initial.y-moved.y-delta)<2,actor+' panel moves with scroll at '+width);
+    assert.ok(moved.y+moved.height<=viewport.y+2,actor+' panel leaves view at '+width);
+    assert.equal(await page.locator('#managementSemester').inputValue(),'5');
+    await scroll.evaluate(async el=>{el.scrollTop=0;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
+    const restored=await page.locator('#departmentContext').boundingBox();assert.ok(Math.abs(restored.y-initial.y)<2,actor+' panel returns on scroll up at '+width);
+   }
+   await page.setViewportSize({width:1366,height:900});
+   await page.locator('#toggleDirectory').click();
+   const fifthResponse=page.waitForResponse(r=>r.url().endsWith('/api/administration/directory'));
+   await page.locator('#departmentDirectory [name=status]').selectOption('active');
+   const fifth=await(await fifthResponse).json();assert.equal(fifth.total,265);assert.ok(fifth.rows.every(r=>Number(r.semester)===5));
    const options=await page.locator('#managementSemester option').allTextContents();assert.deepEqual(options,['1st Semester','2nd Semester','3rd Semester','4th Semester','5th Semester','6th Semester','7th Semester','8th Semester']);
    await page.locator('#managementSemester').selectOption('3');await page.waitForLoadState('load');await page.locator('#importFile').waitFor();
    assert.equal(await page.locator('#managementSemester').inputValue(),'3');assert.match(await page.locator('#importTarget').innerText(),/Target Semester: 3/);
+   await page.locator('#toggleDirectory').click();
+   const thirdResponse=page.waitForResponse(r=>r.url().endsWith('/api/administration/directory'));
+   await page.locator('#departmentDirectory [name=status]').selectOption('active');
+   const third=await(await thirdResponse).json();assert.equal(third.total,1);assert.ok(third.rows.every(r=>Number(r.semester)===3));
+   if(actor==='super')assert.equal(await page.locator('#managementDepartment').inputValue(),'dept_ISE');
+
    if(actor==='super')await page.locator('body.workspace-ready').waitFor();
    if(await page.locator('#importType').isVisible())await page.locator('#importType').selectOption('students');else assert.equal(await page.locator('#importType').inputValue(),'students');
    const csv='usn,auid,name,college_email,phone,scheme,semester,section,mentor_employee_id\r\nSEM5NEWUI,SEM5AUI,Preview Only,preview.ui@college.test,9876543210,2022,5,A,ISE-FAC-001';
