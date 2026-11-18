@@ -1973,3 +1973,7 @@ dialog.delete-review-cascade { width: min(94vw, 640px); }
 #importPreview .student-preview-table th { white-space:nowrap; }
 .student-preview-table :is(th,td):nth-child(6) { width:120px; }
 .student-preview-table :is(th,td):nth-child(7) { width:100px; }
+
+/* Department Admin context uses the same gutter as its main content, without a narrower cap. */
+body:not(.super-admin-page):has(script[src="js/institutional-admin.js"]) #departmentContext.management-context { width:calc(100% - 48px); max-width:none; }
+@media (max-width:520px) { body:not(.super-admin-page):has(script[src="js/institutional-admin.js"]) #departmentContext.management-context { width:calc(100% - 28px); } }

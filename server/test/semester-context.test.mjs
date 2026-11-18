@@ -198,8 +198,9 @@ test('Chrome admin semester selector persists, refreshes cohorts and shows a com
    await page.goto(url);await page.locator('#managementSemester').waitFor();
    if(actor==='super'){await page.locator('#managementDepartment').selectOption('dept_ISE');await page.waitForLoadState('load');}
    await page.locator('#importFile').waitFor();assert.equal(await page.locator('#managementSemester').inputValue(),'5');
-   for(const width of [1366,768,390]){
+   for(const width of [1920,1366,768,390]){
     await page.setViewportSize({width,height:900});
+    if(actor==='department-admin'){const panel=await page.locator('#departmentContext').boundingBox(),main=await page.locator('#content').evaluate(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return {left:r.left+parseFloat(s.paddingLeft),right:r.right-parseFloat(s.paddingRight)};});assert.ok(Math.abs(panel.x-main.left)<2&&Math.abs(panel.x+panel.width-main.right)<2,'Department Admin context aligns at '+width);}
     const position=await page.locator('#departmentContext').evaluate(el=>getComputedStyle(el).position);assert.equal(position,'static',actor+' normal positioning at '+width);
     const scroll=page.locator('.department-scroll');
     await scroll.evaluate(async el=>{el.scrollTop=0;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
@@ -274,3 +275,55 @@ test('Chrome admin semester selector persists, refreshes cohorts and shows a com
  assert.equal(authMutations,0);
 });
 
+
+
+test('25/25/10 policy applies in two departments and all eight semesters without rewriting historical scores',async()=>{
+ const {defaultComponents,assessmentComponents}=await import('../../js/assessment-policy.js');
+ assert.deepEqual(defaultComponents.map(c=>c.max),[25,25,10]);
+ assert.equal(assessmentComponents([{id:'quiz',label:'Quiz',max:50}])[0].max,50);
+ assert.equal(assessmentComponents([{id:'legacy1',label:'Internal Assessment 1',max:30}])[0].max,25);
+ const protectedNames=['noDueRequests','approvals','clearancePlans','superAdminAudit'],before={};for(const n of protectedNames)before[n]=await database.collection(n).find({}).sort({_id:1}).toArray();
+ for(const department of ['MKI','MKC'])for(let semester=1;semester<=8;semester++){
+  const prefix=department+'-'+semester,did='marks-'+department,teacher=prefix+'-teacher',student=prefix+'-student',offering=prefix+'-offering',enrollment=student+'__'+offering;
+  await database.collection('departments').updateOne({_id:did},{$set:{code:department,name:department,codeKey:department.toLowerCase(),nameKey:department.toLowerCase(),status:'active'}},{upsert:true});
+  await database.collection('users').insertMany([{_id:teacher,name:teacher,email:teacher+'@college.test',role:'subject_faculty',isMentor:true,department,departmentId:did,accountStatus:'active'},{_id:student,name:student,email:student+'@college.test',role:'student',department,departmentId:did,accountStatus:'active'}]);
+  await database.collection('students').insertOne({_id:student,name:student,email:student+'@college.test',usn:prefix,department,departmentId:did,mentorId:teacher,scheme:'2022',semester,section:'A'});
+  const original={_id:offering,subjectId:'subject-'+offering,subjectCode:prefix,subjectName:prefix,department,departmentId:did,scheme:'2022',semester,section:'A',teacherId:teacher,active:true,components:defaultComponents.map(c=>({...c,max:c.id==='assignment'?10:30}))};
+  await database.collection('offerings').insertOne(original);await database.collection('enrollments').insertOne({_id:enrollment,studentId:student,offeringId:offering,teacherId:teacher,mentorId:teacher,active:true});
+  const legacy={_id:enrollment,studentId:student,offeringId:offering,scores:{ia1:29,ia2:20,assignment:7},updatedAt:new Date('2026-01-01')};await database.collection('marks').insertOne(legacy);
+  const summary=await get(student,semester,'/api/academic/student/'+student);assert.equal(summary.status,200);assert.deepEqual(summary.body.subjects[0].offering.components.map(c=>c.max),[25,25,10]);assert.equal(summary.body.subjects[0].marks.scores.ia1,29);
+  const viewed=await get(teacher,semester,'/api/offerings/'+offering);assert.deepEqual(viewed.body.components.map(c=>c.max),[25,25,10]);assert.deepEqual(await database.collection('marks').findOne({_id:enrollment}),legacy);
+  for(const scores of [{ia1:-1},{ia1:25.01},{ia1:26},{ia2:26},{assignment:11},{ia1:null}]){const r=await request(app).put('/api/marks/'+enrollment).set('Authorization','Bearer '+teacher).set('X-Semester',String(semester)).send({scores});assert.equal(r.status,400,JSON.stringify(r.body));}
+  assert.deepEqual(await database.collection('marks').findOne({_id:enrollment}),legacy);
+  const exported=await get(teacher,semester,'/api/marks-csv/'+offering+'/export');assert.equal(exported.status,200);assert.deepEqual(exported.body.columns.map(c=>c.max),[25,25,10]);assert.ok(exported.body.csv.includes('"29"'));
+  const csv=exported.body.csv.replace('"29"','""').replace(/"7"\r\n$/,'"9"\r\n');
+  const preview=await call(teacher,semester,'/api/marks-csv/'+offering+'/preview',{csv});assert.equal(preview.body.valid,1,JSON.stringify(preview.body));
+  assert.equal((await call(teacher,semester,'/api/marks-csv/'+offering+'/import',{csv,confirm:true})).status,200);assert.deepEqual((await database.collection('marks').findOne({_id:enrollment})).scores,{ia1:29,ia2:20,assignment:9});
+  const invalid=exported.body.csv.replace('"29"','"26"');assert.equal((await call(teacher,semester,'/api/marks-csv/'+offering+'/preview',{csv:invalid})).body.errors,1);
+  for(const scores of [{ia1:0,ia2:0,assignment:0},{ia1:25,ia2:25,assignment:10}])assert.equal((await request(app).put('/api/marks/'+enrollment).set('Authorization','Bearer '+teacher).set('X-Semester',String(semester)).send({scores})).status,200);
+  assert.deepEqual(await database.collection('offerings').findOne({_id:offering}),{...original,marksImportRevision:1});
+ }
+ for(const[n,rows]of Object.entries(before))assert.deepEqual(await database.collection(n).find({}).sort({_id:1}).toArray(),rows,n+' unchanged by marks limits');
+ assert.equal(authMutations,0);
+});
+
+
+test('Chrome student, mentor and faculty agree on maxima and editing another field preserves a legacy score',async()=>{
+ const {chromium}=await import('playwright'),{default:express}=await import('express'),{fileURLToPath}=await import('node:url');
+ await database.collection('offerings').updateOne({_id:'class-5'},{$set:{components:[{id:'ia1',label:'IA1',max:30},{id:'ia2',label:'IA2',max:30},{id:'assignment',label:'Assignment',max:10}]}});
+ const backend=app.listen(0,'127.0.0.1');await new Promise(r=>backend.once('listening',r));const frontend=express().use(express.static(fileURLToPath(new URL('../..',import.meta.url)))).listen(5064,'127.0.0.1'),browser=await chromium.launch({channel:'chrome',headless:true});
+ try{for(const actor of ['student-5-0','teacher']){
+  const context=await browser.newContext(),p=await context.newPage(),profile=await database.collection('users').findOne({_id:actor});p.setDefaultTimeout(20000);const errors=[];p.on('pageerror',e=>errors.push(e.message));
+  await context.route('**/js/firebase-config.js',r=>r.fulfill({contentType:'text/javascript',body:'export const auth={currentUser:{uid:'+JSON.stringify(actor)+',getIdToken:async()=>'+JSON.stringify(actor)+'}};export const db={};export const functions={};export const isEmulator=false;'}));
+  await context.route('**/js/api-config.js',r=>r.fulfill({contentType:'text/javascript',body:'export const API_BASE_URL='+JSON.stringify('http://127.0.0.1:'+backend.address().port)+';'}));
+  await context.route('**/js/auth.js',r=>r.fulfill({contentType:'text/javascript',body:'export const wireLogout=()=>{};export async function requireAuth(){document.body.classList.remove("auth-pending");return '+JSON.stringify({...profile,uid:actor})+';}'}));
+  context.on('request',r=>assert.ok(!/onrender.com|googleapis.com|firebaseapp.com/.test(r.url()),'Never contact production from isolated regression'));
+  await p.goto('http://127.0.0.1:5064/academic.html?student=student-5-0');const subject=p.locator('.academic-subject').filter({hasText:'OVERLAP'});await subject.waitFor();assert.deepEqual(await subject.locator('tbody tr td:last-child').allTextContents(),['25','25','10']);assert.equal(await subject.locator('tbody tr').first().locator('td').nth(1).innerText(),'29');assert.equal(await subject.locator('input').count(),0);
+  if(actor==='teacher'){await p.goto('http://127.0.0.1:5064/academic.html#teaching');await p.locator('.class-button[data-id="class-5"]').click();const row=p.locator('.marks-row').filter({has:p.getByText('SEM5STU0000',{exact:true})});await row.waitFor();assert.equal(await row.locator('[name=ia1]').getAttribute('max'),'25');assert.equal(await row.locator('[name=ia2]').getAttribute('max'),'25');assert.equal(await row.locator('[name=assignment]').getAttribute('max'),'10');
+   await row.locator('[name=assignment]').fill('9');await row.getByRole('button',{name:'Save',exact:true}).click();await row.getByText('Saved',{exact:true}).waitFor();assert.deepEqual((await database.collection('marks').findOne({_id:'student-5-0__class-5'})).scores,{ia1:29,assignment:9});
+   await row.locator('[name=ia1]').fill('26');await row.getByRole('button',{name:'Save',exact:true}).click();assert.equal(await row.locator('[name=ia1]').evaluate(el=>el.validity.rangeOverflow),true);assert.equal((await database.collection('marks').findOne({_id:'student-5-0__class-5'})).scores.ia1,29);
+   await row.locator('[name=ia1]').fill('25');await row.getByRole('button',{name:'Save',exact:true}).click();await row.getByText('Saved',{exact:true}).waitFor();assert.equal((await database.collection('marks').findOne({_id:'student-5-0__class-5'})).scores.ia1,25);
+  }assert.deepEqual(errors,[]);await context.close();
+ }}finally{await browser.close();await new Promise(r=>backend.close(r));await new Promise(r=>frontend.close(r));}
+ assert.equal(authMutations,0);
+});

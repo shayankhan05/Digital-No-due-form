@@ -1,3 +1,4 @@
+import {assessmentComponents} from '../../../js/assessment-policy.js';
 import {newSubjectId} from './subject-semester.js';
 import {semesterResolver} from './semester-context.js';
 import {assertInputSemester,assertRecordSemester,semesterMatch} from './semester-context.js';
@@ -49,7 +50,7 @@ async function teachingRow(database,raw){
  const row={...subject,employeeId,section,teacherEmail:teachers[0].email,credits:subject.credits??existing?.credits??null,components:raw.components||defaultComponents};
  const scope=dep.creationDigest?{departmentId:subject.departmentId}:{$or:[{departmentId:subject.departmentId},{department:subject.department,departmentId:{$exists:false}}]},classes=await database.collection('offerings').find({...scope,scheme:subject.scheme,semester:{$in:[subject.semester,String(subject.semester)]},section,subjectCode:subject.subjectCode}).toArray(),canonical='class_'+hash([subject.department,subject.scheme,subject.semester,section,subject.subjectCode].join('|')).slice(0,32);
  if(classes.length>1)fail('Multiple records exist for this teaching assignment. Resolve them in Academic Setup before importing.');
- if(classes[0]&&classes[0]._id!==canonical){const old=classes[0];if(old.teacherId!==teachers[0]._id||JSON.stringify(old.components)!==JSON.stringify(row.components)||(old.active!==false)!==row.active)fail('Existing class teacher, assessments or status differ. Edit that class explicitly; import will not overwrite it.');row.existingClassId=old._id;}
+ if(classes[0]&&classes[0]._id!==canonical){const old=classes[0];if(old.teacherId!==teachers[0]._id||JSON.stringify(assessmentComponents(old.components))!==JSON.stringify(assessmentComponents(row.components))||(old.active!==false)!==row.active)fail('Existing class teacher, assessments or status differ. Edit that class explicitly; import will not overwrite it.');row.existingClassId=old._id;}
  return row;
 }
 export function collegeImportRoutes(app,{database,client,store,auth,provisionerOptions,service}){

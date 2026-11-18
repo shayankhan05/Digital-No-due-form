@@ -1,3 +1,4 @@
+import {assessmentComponents} from '../../../js/assessment-policy.js';
 export function allowedCollegeDomains(values,existing={},demo=false){
  if(!Array.isArray(values))throw Object.assign(Error('Configure valid college domains.'),{code:'invalid-argument'});
  const domains=[...new Set(values.map(v=>String(v||'').trim().toLowerCase().replace(/^@/,'')))];
@@ -688,7 +689,7 @@ export function createProvisioner({db,auth,demo=false,sendActivation=async()=>{t
     row.departmentId=p.departmentRecords.find(d=>d.code===row.department)?.id;
     row.id=`class_${hash([row.department,row.scheme,row.semester,row.section,row.subjectCode].join('|')).slice(0,32)}`;
     const previous=(await db.doc(`offerings/${row.id}`).get()).data();
-    if(previous && (previous.teacherId!==row.teacherId || JSON.stringify(previous.components)!==JSON.stringify(row.components))) fail('Existing offering teacher/assessments differ. Use advanced editing with explicit plan refresh; bulk import will not rewrite existing marks mappings.');
+    if(previous && (previous.teacherId!==row.teacherId || JSON.stringify(assessmentComponents(previous.components))!==JSON.stringify(assessmentComponents(row.components)))) fail('Existing offering teacher/assessments differ. Use advanced editing with explicit plan refresh; bulk import will not rewrite existing marks mappings.');
     return row;
   }
   async function previewOfferings(inputs) {
