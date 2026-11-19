@@ -13,3 +13,13 @@ export const serverTimestamp=()=>({__type:'timestamp'}),arrayRemove=(...values)=
 export function writeBatch(){const operations=[];return {set:(ref,data,options)=>operations.push({type:'set',path:ref.path,data,options}),update:(ref,data)=>operations.push({type:'update',path:ref.path,data}),commit:()=>post('/api/data/write',{operations})};}
 export const setDoc=(ref,data,options)=>post('/api/data/write',{operations:[{type:'set',path:ref.path,data,options}]}),updateDoc=(ref,data)=>post('/api/data/write',{operations:[{type:'update',path:ref.path,data}]});
 export function onSnapshot(ref,next,error){let stopped=false,busy=false;const refresh=async()=>{if(stopped||busy)return;busy=true;try{const snapshot=ref.filters||ref.orders?await getDocs(ref):await getDoc(ref);if(!stopped)next(snapshot);}catch(e){if(!stopped)error?.(e);}finally{busy=false;}};refresh();const timer=setInterval(refresh,3000);return ()=>{stopped=true;clearInterval(timer);};}
+
+export function onPagedSnapshot(ref,next,error){
+ let stopped=false,busy=false;
+ const refresh=async()=>{if(stopped||busy)return;busy=true;try{
+  const docs=[],requested=Math.max(1,Number(ref.limit)||30);let size=0,cursor=ref.cursor,more=true;
+  while(!stopped&&more&&size<requested){const page=await getDocs({...ref,limit:Math.min(100,requested-size),cursor});docs.push(...page.docs);size+=page.size;more=page.more;if(!page.size||page.cursor===cursor)break;cursor=page.cursor;}
+  if(!stopped)next({docs,size,empty:!docs.length,cursor,more});
+ }catch(e){if(!stopped)error?.(e);}finally{busy=false;}};
+ refresh();const timer=setInterval(refresh,3000);return()=>{stopped=true;clearInterval(timer);};
+}

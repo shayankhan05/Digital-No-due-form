@@ -12,7 +12,7 @@ import {
   collection,
   query,
   where,
-  onSnapshot, limit
+  onSnapshot, onPagedSnapshot, limit
 } from "./api-store.js";
 
 
@@ -89,7 +89,7 @@ function startApprovalListener(approver) {
     ...clauses
   );
 
-  unsubscribeApprovals = onSnapshot(
+  unsubscribeApprovals = (approver.role==='sports'?onPagedSnapshot:onSnapshot)(
     q,
 
     (snap) => {

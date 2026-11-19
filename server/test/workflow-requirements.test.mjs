@@ -113,3 +113,18 @@ test('Semester 3 workflow account setup does not require globally configured lab
   assert.deepEqual(await database.collection('noDueRequests').find({}).sort({_id:1}).toArray(),requests);
  }finally{await database.collection('institutionPolicy').replaceOne({_id:'workflow'},policy);await database.collection('departmentWorkflows').replaceOne({_id:'dept_A'},workflow);}
 });
+
+test('Sports Load more reaches pending requests beyond the API 100-record page boundary',async()=>{
+ await database.collection('noDueRequests').insertMany(Array.from({length:135},(_,i)=>({_id:'queue_'+String(i).padStart(3,'0'),studentId:'queue_student_'+i,studentName:'Queue Student '+i,usn:'QUEUE'+i,department:i%2?'A':'B',semester:i%8+1,section:'A',status:'pending_stage1',approverIds:['sports'],approvalItems:{sports:{approverType:'sports',approverId:'sports',label:'Sports Incharge'}},approvalStates:{sports:'pending'}})));
+ const {chromium}=await import('playwright'),{default:express}=await import('express'),{fileURLToPath}=await import('node:url'),backend=app.listen(0,'127.0.0.1');await new Promise(r=>backend.once('listening',r));
+ const frontend=express().use(express.static(fileURLToPath(new URL('../..',import.meta.url)))).listen(5067,'127.0.0.1'),browser=await chromium.launch({channel:'chrome',headless:true});
+ try{const c=await browser.newContext(),p=await c.newPage();p.setDefaultTimeout(20000);
+ await c.route('**/js/firebase-config.js',r=>r.fulfill({contentType:'text/javascript',body:'export const auth={currentUser:{uid:"sports",getIdToken:async()=>"sports"}};export const db={};export const functions={};export const isEmulator=false;'}));
+ await c.route('**/js/api-config.js',r=>r.fulfill({contentType:'text/javascript',body:'export const API_BASE_URL='+JSON.stringify('http://127.0.0.1:'+backend.address().port)+';'}));
+ await c.route('**/js/auth.js',r=>r.fulfill({contentType:'text/javascript',body:'export const wireLogout=()=>{};export async function requireAuth(){document.body.classList.remove("auth-pending");return {uid:"sports",name:"Sports Incharge",role:"sports",scope:"institution"};}'}));
+ await p.goto('http://127.0.0.1:5067/approver-dashboard.html#requests');await p.locator('[data-path]').first().waitFor();
+ let pages=0;while(!await p.locator('[data-path="noDueRequests/queue_134/approvals/sports"]').count()&&pages++<8){await p.locator('#moreApprovals').click();await p.waitForTimeout(150);}
+ await p.locator('[data-path="noDueRequests/queue_134/approvals/sports"]').waitFor();assert.ok(await p.locator('[data-path]').count()>100);assert.equal(await p.locator('#mentorCapabilityLink').count(),0);await c.close();
+ }finally{await browser.close();await new Promise(r=>backend.close(r));await new Promise(r=>frontend.close(r));}
+ assert.equal(authChanges,0);
+});
