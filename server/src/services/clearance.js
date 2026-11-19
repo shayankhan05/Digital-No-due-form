@@ -3,8 +3,8 @@ import {departmentCode} from '../../../js/department.js';
 import {isInactive} from './account-removal.js';
 import {FieldValue} from './values.js';
 
-export const REQUIRED_SERVICES=['library','accounts','sports'];
-export const requiredServices=(config,semester)=>[...REQUIRED_SERVICES,...(Number(semester)>=1&&Number(semester)<=2?['physics_lab','chemistry_lab']:[])];
+export {REQUIRED_SERVICES,requiredServices} from '../../../js/workflow-services.js';
+import {requiredServices} from '../../../js/workflow-services.js';
 const text=v=>String(v ?? '').trim();
 const department=v=>departmentCode(v).toLowerCase();
 export function matchesStudent(student,offering) {
@@ -21,7 +21,7 @@ export function subjectItem(uid,student,offering,teacher) {
     semester:Number(student.semester),section:text(student.section).toUpperCase()};
 }
 export async function workflowFor(db,student){
- if(student?.departmentId){const specific=(await db.doc('departmentWorkflows/'+student.departmentId).get()).data();if(specific){if(!specific.sports){const shared=(await db.doc('settings/workflow').get()).data();if(shared?.sports)return {...specific,sports:shared.sports};}return specific;}}
+ if(student?.departmentId){const specific=(await db.doc('departmentWorkflows/'+student.departmentId).get()).data();if(specific){const shared=(await db.doc('settings/workflow').get()).data()||{};return {...specific,...(shared.sports?{sports:shared.sports}:{}),...Object.fromEntries(['physics_lab','chemistry_lab'].filter(role=>!specific[role]&&shared[role]).map(role=>[role,shared[role]]))};}}
  // Once department masters exist, never guess a department or fall back to the
  // historical shared Office. Unconfigured identities require explicit setup.
  if(!(await db.collection('departments').limit(1).get()).empty)return null;

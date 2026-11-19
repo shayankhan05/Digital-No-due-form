@@ -1,3 +1,4 @@
+import {requiredServices} from './workflow-services.js';
 import {assertSemester} from './semester.js';
 import {departmentCode} from './department.js';
 import { db } from "./firebase-config.js";
@@ -77,7 +78,7 @@ export async function preparePlan(uid) {
   await requireRole(config.hodId, ["hod"]); await requireRole(config.officeId, ["office"]);
   const items = {}, initialStates = {}, offeringIds = [], teacherIds = [];
   const batch = writeBatch(db);
-  for (const type of [...SERVICES,...(Number(student.semester)<=2?["physics_lab","chemistry_lab"]:[])]) {
+  for (const type of requiredServices(config,student.semester)) {
     await requireRole(config[type], [type]);
     items[type] = { approverType: type, approverId: config[type], label: type.replaceAll("_", " "), subjectCode: null, offeringId: null };
   }
