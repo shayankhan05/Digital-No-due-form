@@ -32,7 +32,21 @@
       "**/node_modules/**",
       "server/**",
       "legacy-firestore/**",
-      "render.yaml"
+      "render.yaml",
+      ".git",
+      ".git/**",
+      ".github",
+      ".github/**",
+      ".codex",
+      ".codex/**",
+      ".agents",
+      ".agents/**",
+      ".aws",
+      ".aws/**",
+      "**/.env",
+      "**/.env.*",
+      "**/*adminsdk*.json",
+      "**/*.key"
     ]
   },
   "emulators": {
